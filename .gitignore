@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Steward runtime
+data/
+.env
+*.log
+
+# Config (real, not examples)
+config/core.yml
+config/integrations/*.yml
+!config/integrations/*.yml.example
+
+# OS
+.DS_Store
+Thumbs.db

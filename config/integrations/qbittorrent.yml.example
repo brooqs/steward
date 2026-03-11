@@ -1,0 +1,6 @@
+# qBittorrent Integration
+# Copy to qbittorrent.yml and fill in your values.
+
+url: "http://localhost:8080"
+username: "admin"
+password: "your-password-here"

@@ -1,0 +1,20 @@
+# Steward Core Configuration
+# Copy this file and fill in your values.
+
+# ── Anthropic / Claude ────────────────────────────────────────────────────────
+anthropic_api_key: ""          # or set ANTHROPIC_API_KEY env var
+model: "claude-3-5-sonnet-20241022"
+max_tokens: 4096
+
+# ── System Prompt ─────────────────────────────────────────────────────────────
+system_prompt: |
+  You are Steward, a helpful AI personal assistant.
+  You have access to smart home controls, media, and download tools.
+  Be concise, accurate, and friendly. When using tools, explain what you did.
+
+# ── Memory ────────────────────────────────────────────────────────────────────
+db_path: "data/memory.db"
+max_history_messages: 50
+
+# ── Telegram Channel ──────────────────────────────────────────────────────────
+telegram_token: ""             # or set TELEGRAM_TOKEN env var
