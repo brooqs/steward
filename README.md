@@ -130,25 +130,6 @@ token: "your-long-lived-access-token"
 
 **Tools exposed:** `ha_get_entity_state`, `ha_call_service`, `ha_list_entities`
 
-### Jellyfin
-
-```yaml
-url: "http://jellyfin.local:8096"
-api_key: "your-api-key"
-```
-
-**Tools exposed:** `jellyfin_search`, `jellyfin_sessions`, `jellyfin_recently_added`
-
-### qBittorrent
-
-```yaml
-url: "http://localhost:8080"
-username: "admin"
-password: "your-password"
-```
-
-**Tools exposed:** `qbt_list_torrents`, `qbt_add_torrent`, `qbt_pause_torrent`, `qbt_resume_torrent`
-
 ---
 
 ## Channels
