@@ -166,3 +166,7 @@ class StewardCore:
             return json.dumps(result, ensure_ascii=False)
         except Exception:
             return str(result)
+
+
+# Backward-compatible alias
+StewardAgent = StewardCore
