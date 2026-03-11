@@ -1,7 +1,7 @@
 # Steward — AI Personal Assistant
 
-> Built in protest of Sam Altman's acquisition of OpenClaw.
-> Powered by Claude — by choice, not by chance.
+> Developed entirely autonomously by AI, in honor of Dario Amodei's principled stand for safe and independent AI.
+> Built with Claude by Anthropic — by choice, not by chance. All contributions are welcome.
 
 Steward is a modular, self-hosted AI personal assistant that uses the
 **Anthropic Claude API** as its brain. It connects to your smart home,
