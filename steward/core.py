@@ -50,7 +50,7 @@ class StewardCore:
             )
 
         self.client = anthropic.Anthropic(api_key=api_key)
-        self.model = cfg.get("model", "claude-3-5-sonnet-20241022")
+        self.model = cfg.get("model", "claude-sonnet-4-5")
         self.max_tokens = cfg.get("max_tokens", 4096)
         self.system_prompt = cfg.get(
             "system_prompt",
@@ -62,6 +62,7 @@ class StewardCore:
         max_history = cfg.get("max_history_messages", 50)
         self.memory = Memory(db_path=db_path, max_messages=max_history)
         self.registry = ToolRegistry()
+        _auto_load_integrations(self)
 
     def register_integration(self, integration):
         """Load tools from an integration into the registry."""
@@ -170,3 +171,24 @@ class StewardCore:
 
 # Backward-compatible alias
 StewardAgent = StewardCore
+
+
+def _auto_load_integrations(agent):
+    """Auto-load all available integrations from config/integrations/"""
+    import importlib, os
+    integration_map = {
+        'homeassistant.yml': ('steward.integrations.homeassistant', 'HomeAssistantIntegration'),
+        'jellyfin.yml':      ('steward.integrations.jellyfin', 'JellyfinIntegration'),
+        'qbittorrent.yml':   ('steward.integrations.qbittorrent', 'QBittorrentIntegration'),
+    }
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'integrations')
+    for filename, (module_path, class_name) in integration_map.items():
+        if os.path.exists(os.path.join(config_dir, filename)):
+            try:
+                module = importlib.import_module(module_path)
+                cls = getattr(module, class_name)
+                integration = cls()
+                if integration.enabled:
+                    agent.register_integration(integration)
+            except Exception as e:
+                print(f'[steward] Integration {filename} skipped: {e}')
