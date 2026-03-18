@@ -3,7 +3,8 @@
 // This is the lightweight client that runs on user machines to connect
 // to the central Steward server. It provides:
 //   - Text-based chat interaction
-//   - Audio capture (microphone → server for STT)
+//   - Push-to-talk voice input (Enter to record, Enter to send)
+//   - Wake word detection ("Hey Steward" always-listening mode)
 //   - Audio playback (server TTS → speaker)
 //   - Remote shell command execution
 //   - System information reporting
@@ -18,15 +19,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -50,6 +54,7 @@ var (
 func main() {
 	serverURL := flag.String("server", "ws://localhost:9090/ws", "Steward server WebSocket URL")
 	token := flag.String("token", "", "authentication token")
+	wakeWord := flag.String("wake-word", "steward", "wake word for always-listening mode")
 	logLevel := flag.String("log-level", "info", "log level: debug | info | warn | error")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
@@ -75,6 +80,7 @@ func main() {
 	client := &SatelliteClient{
 		serverURL: *serverURL,
 		token:     *token,
+		wakeWord:  strings.ToLower(*wakeWord),
 	}
 
 	if err := client.Run(ctx); err != nil {
@@ -87,7 +93,10 @@ func main() {
 type SatelliteClient struct {
 	serverURL string
 	token     string
+	wakeWord  string
 	conn      *websocket.Conn
+	writeMu   sync.Mutex // protects concurrent writes to websocket
+	listening bool       // wake word mode active
 }
 
 // Run connects to the server and enters the main loop.
@@ -152,7 +161,13 @@ func (c *SatelliteClient) authenticate() error {
 	case "auth_ok":
 		satID, _ := resp.Payload["satellite_id"].(string)
 		fmt.Printf("🟢 Connected to Steward (satellite: %s)\n", satID)
-		fmt.Println("Type a message to chat, or 'quit' to exit.")
+		fmt.Println("─────────────────────────────────────────")
+		fmt.Println("Commands:")
+		fmt.Println("  /voice    — Push-to-talk (press Enter to record, Enter to send)")
+		fmt.Println("  /listen   — Wake word mode (say 'Hey Steward' to activate)")
+		fmt.Println("  /stop     — Stop wake word listening")
+		fmt.Println("  /sysinfo  — Send system info")
+		fmt.Println("  quit      — Exit")
 		fmt.Println("─────────────────────────────────────────")
 		return nil
 	case "auth_fail":
@@ -244,26 +259,271 @@ func (c *SatelliteClient) interactiveLoop(ctx context.Context) {
 			return
 		}
 
-		// Special commands
-		if text == "/sysinfo" {
+		// Commands
+		switch text {
+		case "/voice":
+			c.pushToTalk(ctx)
+			fmt.Print("> ")
+			continue
+		case "/listen":
+			c.startWakeWordMode(ctx)
+			fmt.Print("> ")
+			continue
+		case "/stop":
+			c.listening = false
+			fmt.Println("🔇 Wake word mode stopped")
+			fmt.Print("> ")
+			continue
+		case "/sysinfo":
 			c.sendSystemInfo()
 			fmt.Print("> ")
 			continue
 		}
 
 		// Send text message
-		msg := Message{
-			Type:      "text",
-			ID:        fmt.Sprintf("msg_%d", time.Now().UnixNano()),
-			Timestamp: time.Now(),
-			Payload:   map[string]any{"text": text},
-		}
-		data, _ := json.Marshal(msg)
-		if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			fmt.Printf("❌ Send failed: %s\n", err)
-		}
+		c.sendText(text)
 	}
 }
+
+func (c *SatelliteClient) sendText(text string) {
+	msg := Message{
+		Type:      "text",
+		ID:        fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+		Timestamp: time.Now(),
+		Payload:   map[string]any{"text": text},
+	}
+	data, _ := json.Marshal(msg)
+	c.writeMu.Lock()
+	c.conn.WriteMessage(websocket.TextMessage, data)
+	c.writeMu.Unlock()
+}
+
+func (c *SatelliteClient) sendAudio(audioData []byte, format string) {
+	msg := Message{
+		Type:        "audio",
+		ID:          fmt.Sprintf("audio_%d", time.Now().UnixNano()),
+		Timestamp:   time.Now(),
+		AudioFormat: format,
+		Payload: map[string]any{
+			"audio_base64": base64.StdEncoding.EncodeToString(audioData),
+		},
+	}
+	data, _ := json.Marshal(msg)
+	c.writeMu.Lock()
+	c.conn.WriteMessage(websocket.TextMessage, data)
+	c.writeMu.Unlock()
+}
+
+// ── Push-to-Talk ──────────────────────────────────────────────
+
+func (c *SatelliteClient) pushToTalk(ctx context.Context) {
+	fmt.Println("🎙️  Recording... Press Enter to stop and send.")
+
+	audioData, err := c.recordUntilEnter(ctx)
+	if err != nil {
+		fmt.Printf("❌ Recording failed: %s\n", err)
+		return
+	}
+
+	if len(audioData) < 1000 {
+		fmt.Println("⚠️  Recording too short, discarded")
+		return
+	}
+
+	fmt.Println("📤 Sending audio...")
+	c.sendAudio(audioData, "wav")
+}
+
+func (c *SatelliteClient) recordUntilEnter(ctx context.Context) ([]byte, error) {
+	tmpFile := fmt.Sprintf("/tmp/steward_rec_%d.wav", time.Now().UnixNano())
+
+	// Detect recording tool
+	recorder, args := c.getRecorder(tmpFile)
+	if recorder == "" {
+		return nil, fmt.Errorf("no recording tool found (install arecord, sox, or ffmpeg)")
+	}
+
+	cmd := exec.CommandContext(ctx, recorder, args...)
+	cmd.Stderr = nil // suppress recorder output
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting recorder: %w", err)
+	}
+
+	// Wait for Enter key in a goroutine
+	done := make(chan struct{})
+	go func() {
+		bufio.NewReader(os.Stdin).ReadBytes('\n')
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// User pressed Enter — stop recording
+		cmd.Process.Signal(syscall.SIGINT)
+		time.Sleep(200 * time.Millisecond)
+		cmd.Process.Kill()
+	case <-ctx.Done():
+		cmd.Process.Kill()
+		return nil, ctx.Err()
+	}
+
+	cmd.Wait()
+
+	// Read recorded file
+	data, err := os.ReadFile(tmpFile)
+	os.Remove(tmpFile)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (c *SatelliteClient) getRecorder(outputFile string) (string, []string) {
+	// arecord (ALSA)
+	if _, err := exec.LookPath("arecord"); err == nil {
+		return "arecord", []string{"-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "wav", outputFile}
+	}
+	// sox (rec)
+	if _, err := exec.LookPath("rec"); err == nil {
+		return "rec", []string{"-r", "16000", "-c", "1", "-b", "16", outputFile}
+	}
+	// ffmpeg
+	if _, err := exec.LookPath("ffmpeg"); err == nil {
+		if runtime.GOOS == "linux" {
+			return "ffmpeg", []string{"-y", "-f", "pulse", "-i", "default", "-ar", "16000", "-ac", "1", "-t", "30", outputFile}
+		} else if runtime.GOOS == "darwin" {
+			return "ffmpeg", []string{"-y", "-f", "avfoundation", "-i", ":0", "-ar", "16000", "-ac", "1", "-t", "30", outputFile}
+		}
+	}
+	return "", nil
+}
+
+// ── Wake Word Mode ────────────────────────────────────────────
+
+func (c *SatelliteClient) startWakeWordMode(ctx context.Context) {
+	if c.listening {
+		fmt.Println("🎧 Already listening!")
+		return
+	}
+
+	ww := c.wakeWord
+	fmt.Printf("🎧 Wake word mode ON — say 'Hey %s' or '%s' to activate\n", ww, ww)
+	fmt.Println("   Type /stop to exit wake word mode")
+	c.listening = true
+
+	go c.wakeWordLoop(ctx)
+}
+
+func (c *SatelliteClient) wakeWordLoop(ctx context.Context) {
+	for c.listening {
+		select {
+		case <-ctx.Done():
+			c.listening = false
+			return
+		default:
+		}
+
+		// Record a short chunk (3 seconds)
+		audioData, err := c.recordChunk(ctx, 3)
+		if err != nil {
+			slog.Debug("wake word chunk error", "error", err)
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		// Check if there's actually speech (energy-based VAD)
+		if !hasVoice(audioData) {
+			slog.Debug("silence detected, skipping")
+			continue
+		}
+
+		slog.Debug("voice detected, sending for STT")
+
+		// Send as wake-word check audio
+		msg := Message{
+			Type:        "wake_check",
+			ID:          fmt.Sprintf("wk_%d", time.Now().UnixNano()),
+			Timestamp:   time.Now(),
+			AudioFormat: "wav",
+			Payload: map[string]any{
+				"audio_base64": base64.StdEncoding.EncodeToString(audioData),
+				"wake_word":    c.wakeWord,
+			},
+		}
+		data, _ := json.Marshal(msg)
+		c.writeMu.Lock()
+		c.conn.WriteMessage(websocket.TextMessage, data)
+		c.writeMu.Unlock()
+	}
+}
+
+func (c *SatelliteClient) recordChunk(ctx context.Context, seconds int) ([]byte, error) {
+	tmpFile := fmt.Sprintf("/tmp/steward_wk_%d.wav", time.Now().UnixNano())
+	defer os.Remove(tmpFile)
+
+	recorder, args := c.getRecorderTimed(tmpFile, seconds)
+	if recorder == "" {
+		return nil, fmt.Errorf("no recorder available")
+	}
+
+	cmd := exec.CommandContext(ctx, recorder, args...)
+	cmd.Stderr = nil
+
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+
+	return os.ReadFile(tmpFile)
+}
+
+func (c *SatelliteClient) getRecorderTimed(outputFile string, seconds int) (string, []string) {
+	dur := fmt.Sprintf("%d", seconds)
+
+	if _, err := exec.LookPath("arecord"); err == nil {
+		return "arecord", []string{"-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "wav", "-d", dur, outputFile}
+	}
+	if _, err := exec.LookPath("rec"); err == nil {
+		return "rec", []string{"-r", "16000", "-c", "1", "-b", "16", outputFile, "trim", "0", dur}
+	}
+	if _, err := exec.LookPath("ffmpeg"); err == nil {
+		if runtime.GOOS == "linux" {
+			return "ffmpeg", []string{"-y", "-f", "pulse", "-i", "default", "-ar", "16000", "-ac", "1", "-t", dur, outputFile}
+		}
+	}
+	return "", nil
+}
+
+// hasVoice performs simple energy-based Voice Activity Detection.
+// Returns true if the audio's RMS energy exceeds a threshold.
+func hasVoice(wavData []byte) bool {
+	// WAV header is 44 bytes, pcm data follows
+	if len(wavData) < 100 {
+		return false
+	}
+
+	pcmData := wavData[44:] // skip WAV header
+	if len(pcmData) < 2 {
+		return false
+	}
+
+	var sumSquares float64
+	sampleCount := len(pcmData) / 2
+
+	for i := 0; i < len(pcmData)-1; i += 2 {
+		sample := int16(binary.LittleEndian.Uint16(pcmData[i : i+2]))
+		sumSquares += float64(sample) * float64(sample)
+	}
+
+	rms := math.Sqrt(sumSquares / float64(sampleCount))
+
+	// Threshold: ~300 RMS is typical for speech, ~50 for silence
+	threshold := 200.0
+	slog.Debug("VAD check", "rms", rms, "threshold", threshold, "has_voice", rms > threshold)
+	return rms > threshold
+}
+
+// ── Existing Functionality ────────────────────────────────────
 
 func (c *SatelliteClient) heartbeatLoop(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
@@ -275,7 +535,9 @@ func (c *SatelliteClient) heartbeatLoop(ctx context.Context) {
 		case <-ticker.C:
 			msg := Message{Type: "heartbeat", Timestamp: time.Now()}
 			data, _ := json.Marshal(msg)
+			c.writeMu.Lock()
 			c.conn.WriteMessage(websocket.TextMessage, data)
+			c.writeMu.Unlock()
 		}
 	}
 }
@@ -305,19 +567,20 @@ func (c *SatelliteClient) executeCommand(command, workDir string) {
 		}
 	}
 
-	// Send result back
 	result := Message{
 		Type:      "cmd_result",
 		Timestamp: time.Now(),
 		Payload: map[string]any{
 			"command":   command,
-			"stdout":    truncate(stdout.String(), 65536),
-			"stderr":    truncate(stderr.String(), 65536),
+			"stdout":    truncStr(stdout.String(), 65536),
+			"stderr":    truncStr(stderr.String(), 65536),
 			"exit_code": exitCode,
 		},
 	}
 	data, _ := json.Marshal(result)
+	c.writeMu.Lock()
 	c.conn.WriteMessage(websocket.TextMessage, data)
+	c.writeMu.Unlock()
 }
 
 func (c *SatelliteClient) sendSystemInfo() {
@@ -327,20 +590,17 @@ func (c *SatelliteClient) sendSystemInfo() {
 		Type:      "sys_info",
 		Timestamp: time.Now(),
 		Payload: map[string]any{
-			"hostname": hostname,
-			"os":       runtime.GOOS,
-			"arch":     runtime.GOARCH,
-			"cpus":     runtime.NumCPU(),
+			"hostname":   hostname,
+			"os":         runtime.GOOS,
+			"arch":       runtime.GOARCH,
+			"cpus":       runtime.NumCPU(),
 			"goroutines": runtime.NumGoroutine(),
 		},
 	}
 
-	// Try to get disk usage
 	if dfOut, err := exec.Command("df", "-h", "/").Output(); err == nil {
 		info.Payload["disk_info"] = string(dfOut)
 	}
-
-	// Try to get memory info
 	if runtime.GOOS == "linux" {
 		if memOut, err := exec.Command("free", "-h").Output(); err == nil {
 			info.Payload["memory_info"] = string(memOut)
@@ -351,7 +611,9 @@ func (c *SatelliteClient) sendSystemInfo() {
 	}
 
 	data, _ := json.Marshal(info)
+	c.writeMu.Lock()
 	c.conn.WriteMessage(websocket.TextMessage, data)
+	c.writeMu.Unlock()
 	slog.Info("system info sent")
 }
 
@@ -362,7 +624,10 @@ func (c *SatelliteClient) playAudio(audioB64, format string) {
 		return
 	}
 
-	// Write to temp file
+	if format == "" {
+		format = "mp3"
+	}
+
 	tmpFile := fmt.Sprintf("/tmp/steward_play_%d.%s", time.Now().UnixNano(), format)
 	if err := os.WriteFile(tmpFile, audioData, 0o600); err != nil {
 		slog.Error("failed to write audio file", "error", err)
@@ -370,16 +635,15 @@ func (c *SatelliteClient) playAudio(audioB64, format string) {
 	}
 	defer os.Remove(tmpFile)
 
-	// Try various audio players
 	players := []struct {
 		cmd  string
 		args []string
 	}{
 		{"mpv", []string{"--no-video", "--really-quiet", tmpFile}},
 		{"ffplay", []string{"-nodisp", "-autoexit", "-loglevel", "quiet", tmpFile}},
-		{"aplay", []string{tmpFile}},     // Linux ALSA
-		{"paplay", []string{tmpFile}},    // PulseAudio
-		{"afplay", []string{tmpFile}},    // macOS
+		{"aplay", []string{tmpFile}},
+		{"paplay", []string{tmpFile}},
+		{"afplay", []string{tmpFile}}, // macOS
 	}
 
 	for _, p := range players {
@@ -396,7 +660,7 @@ func (c *SatelliteClient) playAudio(audioB64, format string) {
 	slog.Warn("no audio player found, install mpv or ffplay")
 }
 
-func truncate(s string, maxLen int) string {
+func truncStr(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}

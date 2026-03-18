@@ -23,6 +23,7 @@ const (
 	TypeAuth       MessageType = "auth"        // authentication handshake
 	TypeText       MessageType = "text"        // text chat message
 	TypeAudio      MessageType = "audio"       // audio data for STT
+	TypeWakeCheck  MessageType = "wake_check"  // audio for wake word detection
 	TypeHeartbeat  MessageType = "heartbeat"   // keep-alive
 	TypeSysInfo    MessageType = "sys_info"    // system info response
 	TypeCmdResult  MessageType = "cmd_result"  // shell command result

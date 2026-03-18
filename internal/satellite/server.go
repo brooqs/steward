@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -214,6 +215,8 @@ func (s *Server) handleMessage(ctx context.Context, cc *clientConn, msg Message,
 		go s.handleTextMessage(ctx, cc, msg)
 	case TypeAudio:
 		go s.handleAudioMessage(ctx, cc, msg, rawData)
+	case TypeWakeCheck:
+		go s.handleWakeCheck(ctx, cc, msg)
 	case TypeHeartbeat:
 		s.sendMsg(cc, Message{Type: TypeHeartbeat, Timestamp: time.Now()})
 	case TypeSysInfo:
@@ -305,6 +308,87 @@ func (s *Server) handleAudioMessage(ctx context.Context, cc *clientConn, msg Mes
 		Type:    TypeText,
 		ID:      msg.ID,
 		Payload: map[string]any{KeyText: text},
+	})
+}
+
+func (s *Server) handleWakeCheck(ctx context.Context, cc *clientConn, msg Message) {
+	if s.voiceEngine == nil || !s.voiceEngine.HasSTT() {
+		return // silently skip if no STT
+	}
+
+	audioB64, _ := msg.Payload["audio_base64"].(string)
+	if audioB64 == "" {
+		return
+	}
+	audioData := decodeBase64(audioB64)
+
+	format := msg.AudioFormat
+	if format == "" {
+		format = "wav"
+	}
+
+	// Transcribe the short audio chunk
+	text, err := s.voiceEngine.Transcribe(ctx, audioData, format)
+	if err != nil {
+		slog.Debug("wake check STT failed", "error", err)
+		return
+	}
+
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+
+	wakeWord, _ := msg.Payload["wake_word"].(string)
+	if wakeWord == "" {
+		wakeWord = "steward"
+	}
+
+	lowerText := strings.ToLower(text)
+	slog.Debug("wake check transcription", "text", text, "wake_word", wakeWord)
+
+	// Check if wake word is in the transcription
+	if !strings.Contains(lowerText, strings.ToLower(wakeWord)) {
+		return // no wake word detected
+	}
+
+	slog.Info("wake word detected!",
+		"satellite", cc.info.ID,
+		"text", text,
+	)
+
+	// Remove wake word prefix ("hey steward", "steward", etc.) to get the command
+	command := lowerText
+	for _, prefix := range []string{"hey " + wakeWord, wakeWord} {
+		if strings.HasPrefix(command, prefix) {
+			command = strings.TrimSpace(text[len(prefix):])
+			break
+		}
+	}
+
+	// If the user only said the wake word with no command, acknowledge
+	if strings.TrimSpace(command) == "" || command == lowerText {
+		s.sendMsg(cc, Message{
+			Type:    TypeReply,
+			Payload: map[string]any{KeyText: "Evet, seni dinliyorum?"},
+		})
+		if s.voiceEngine.HasTTS() {
+			if audio, err := s.voiceEngine.Speak(ctx, "Evet, seni dinliyorum?", nil); err == nil {
+				s.sendMsg(cc, Message{
+					Type:        TypeSpeak,
+					AudioFormat: "mp3",
+					Payload:     map[string]any{"audio_base64": encodeBase64(audio)},
+				})
+			}
+		}
+		return
+	}
+
+	// Process the command part
+	s.handleTextMessage(ctx, cc, Message{
+		Type:    TypeText,
+		ID:      msg.ID,
+		Payload: map[string]any{KeyText: command},
 	})
 }
 
