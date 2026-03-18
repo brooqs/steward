@@ -437,13 +437,14 @@
     let waQrRendered = false;
     async function loadWhatsApp() {
       try {
-        const healthRes = await fetch('/api/whatsapp/health');
+        const healthRes = await fetch('/api/whatsapp/health', { credentials: 'same-origin' });
+        if (!healthRes.ok) throw new Error('HTTP ' + healthRes.status);
         const health = await healthRes.json();
 
         if (health.error) {
           document.getElementById('wa-status').innerHTML = '<span class="badge badge-red">Bridge Error</span>';
           document.getElementById('wa-instruction').textContent = 'Bridge unreachable — check bridge_url config';
-          document.getElementById('wa-qr-status').innerHTML = '<div class="status-icon">❌</div><div>' + (health.detail || health.error) + '</div>';
+          document.getElementById('wa-qr-area').innerHTML = '<div class="qr-status"><div class="status-icon">❌</div><div>' + (health.detail || health.error) + '</div></div>';
           return;
         }
 
@@ -461,11 +462,19 @@
           document.getElementById('wa-instruction').textContent = 'Scan the QR code with WhatsApp → Linked Devices → Link a Device';
           document.getElementById('wa-logout-btn').style.display = 'none';
 
-          const qrRes = await fetch('/api/whatsapp/qr');
+          const qrRes = await fetch('/api/whatsapp/qr', { credentials: 'same-origin' });
           const qrData = await qrRes.json();
           if (qrData.available && qrData.data) {
-            document.getElementById('wa-qr-area').innerHTML = '<div class="qr-box"><canvas id="wa-qr-canvas"></canvas></div>';
-            QRCode.toCanvas(document.getElementById('wa-qr-canvas'), qrData.data, { width: 280, margin: 2 });
+            if (typeof QRCode !== 'undefined' && QRCode.toCanvas) {
+              document.getElementById('wa-qr-area').innerHTML = '<div class="qr-box"><canvas id="wa-qr-canvas"></canvas></div>';
+              QRCode.toCanvas(document.getElementById('wa-qr-canvas'), qrData.data, { width: 280, margin: 2 }, function(err) {
+                if (err) console.error('QR render error:', err);
+              });
+            } else {
+              // Fallback: show QR as image via Google Charts API
+              var qrImg = 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=' + encodeURIComponent(qrData.data);
+              document.getElementById('wa-qr-area').innerHTML = '<div class="qr-box"><img src="' + qrImg + '" width="280" height="280" alt="QR Code" style="display:block;border-radius:8px"></div>';
+            }
             waQrRendered = true;
           }
         } else {
@@ -474,8 +483,9 @@
           document.getElementById('wa-qr-area').innerHTML = '<div class="qr-status"><div class="status-icon">⏳</div><div>Starting WhatsApp client...</div></div>';
         }
       } catch (e) {
+        console.error('WhatsApp load error:', e);
         document.getElementById('wa-status').innerHTML = '<span class="badge badge-red">Offline</span>';
-        document.getElementById('wa-instruction').textContent = 'Cannot connect to bridge';
+        document.getElementById('wa-instruction').textContent = 'Cannot connect to bridge — ' + e.message;
       }
     }
 
