@@ -95,8 +95,9 @@ type SatelliteClient struct {
 	token     string
 	wakeWord  string
 	conn      *websocket.Conn
-	writeMu   sync.Mutex // protects concurrent writes to websocket
-	listening bool       // wake word mode active
+	writeMu   sync.Mutex    // protects concurrent writes to websocket
+	listening bool          // wake word mode active
+	wakeAck   chan struct{} // signal from server that wake word was detected
 }
 
 // Run connects to the server and enters the main loop.
@@ -213,7 +214,14 @@ func (c *SatelliteClient) handleServerMessage(msg Message) {
 		// Play audio if we receive TTS
 		audioB64, _ := msg.Payload["audio_base64"].(string)
 		if audioB64 != "" {
-			go c.playAudio(audioB64, msg.AudioFormat)
+			c.playAudio(audioB64, msg.AudioFormat) // blocking — wait for TTS to finish
+		}
+
+	case "wake_ack":
+		// Server confirmed wake word — signal client to start recording command
+		select {
+		case c.wakeAck <- struct{}{}:
+		default:
 		}
 
 	case "cmd_exec":
@@ -408,9 +416,10 @@ func (c *SatelliteClient) startWakeWordMode(ctx context.Context) {
 	}
 
 	ww := c.wakeWord
-	fmt.Printf("🎧 Wake word mode ON — say 'Hey %s' or '%s' to activate\n", ww, ww)
+	fmt.Printf("🎧 Wake word mode ON — say '%s' to activate\n", ww)
 	fmt.Println("   Type /stop to exit wake word mode")
 	c.listening = true
+	c.wakeAck = make(chan struct{}, 1)
 
 	go c.wakeWordLoop(ctx)
 }
@@ -424,7 +433,7 @@ func (c *SatelliteClient) wakeWordLoop(ctx context.Context) {
 		default:
 		}
 
-		// Record a short chunk (3 seconds)
+		// ── PHASE 1: Listen for wake word (3s chunks) ──
 		audioData, err := c.recordChunk(ctx, 3)
 		if err != nil {
 			slog.Debug("wake word chunk error", "error", err)
@@ -432,15 +441,13 @@ func (c *SatelliteClient) wakeWordLoop(ctx context.Context) {
 			continue
 		}
 
-		// Check if there's actually speech (energy-based VAD)
 		if !hasVoice(audioData) {
-			slog.Debug("silence detected, skipping")
 			continue
 		}
 
-		slog.Debug("voice detected, sending for STT")
+		slog.Debug("voice detected, checking wake word")
 
-		// Send as wake-word check audio
+		// Send to server for wake word check
 		msg := Message{
 			Type:        "wake_check",
 			ID:          fmt.Sprintf("wk_%d", time.Now().UnixNano()),
@@ -455,7 +462,101 @@ func (c *SatelliteClient) wakeWordLoop(ctx context.Context) {
 		c.writeMu.Lock()
 		c.conn.WriteMessage(websocket.TextMessage, data)
 		c.writeMu.Unlock()
+
+		// ── PHASE 2: Wait for wake_ack from server ──
+		// Server will send TTS "seni dinliyorum" + wake_ack
+		// The TTS plays (blocking) then we get the ack
+		select {
+		case <-c.wakeAck:
+			fmt.Println("🎤 Listening for your command...")
+		case <-time.After(5 * time.Second):
+			// No wake word detected or server didn't respond
+			continue
+		case <-ctx.Done():
+			return
+		}
+
+		// ── PHASE 3: Record the actual command (until silence) ──
+		cmdAudio, err := c.recordUntilSilence(ctx, 10)
+		if err != nil {
+			slog.Debug("command recording error", "error", err)
+			continue
+		}
+
+		if len(cmdAudio) < 1000 {
+			fmt.Println("⚠️  No command detected")
+			continue
+		}
+
+		// ── PHASE 4: Send command audio for processing ──
+		fmt.Println("📤 Processing command...")
+		c.sendAudio(cmdAudio, "wav")
+
+		// Wait a bit for the response before going back to listening
+		time.Sleep(2 * time.Second)
 	}
+}
+
+// recordUntilSilence records audio and stops when silence is detected.
+// It records in 1-second chunks and stops after consecutive silent chunks.
+func (c *SatelliteClient) recordUntilSilence(ctx context.Context, maxSeconds int) ([]byte, error) {
+	var allAudio []byte
+	silentChunks := 0
+	maxSilent := 2 // stop after 2 consecutive silent 1s chunks (= 2s silence)
+
+	for i := 0; i < maxSeconds; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		chunk, err := c.recordChunk(ctx, 1)
+		if err != nil {
+			break
+		}
+
+		if hasVoice(chunk) {
+			silentChunks = 0
+			// Append PCM data (skip WAV header after first chunk)
+			if len(allAudio) == 0 {
+				allAudio = chunk // first chunk includes WAV header
+			} else if len(chunk) > 44 {
+				allAudio = append(allAudio, chunk[44:]...) // append only PCM data
+			}
+		} else {
+			silentChunks++
+			if silentChunks >= maxSilent && len(allAudio) > 0 {
+				slog.Debug("end of speech detected", "chunks_recorded", i+1)
+				break
+			}
+			// If we have audio and hit first silent chunk, still include it
+			if len(allAudio) > 0 && len(chunk) > 44 {
+				allAudio = append(allAudio, chunk[44:]...)
+			}
+		}
+	}
+
+	// Update WAV header with correct data size
+	if len(allAudio) > 44 {
+		updateWAVHeader(allAudio)
+	}
+
+	return allAudio, nil
+}
+
+// updateWAVHeader fixes the data size fields in a WAV header after concatenating PCM data.
+func updateWAVHeader(wav []byte) {
+	if len(wav) < 44 {
+		return
+	}
+	dataSize := uint32(len(wav) - 44)
+	fileSize := uint32(len(wav) - 8)
+
+	// Bytes 4-7: file size - 8
+	binary.LittleEndian.PutUint32(wav[4:8], fileSize)
+	// Bytes 40-43: data chunk size
+	binary.LittleEndian.PutUint32(wav[40:44], dataSize)
 }
 
 func (c *SatelliteClient) recordChunk(ctx context.Context, seconds int) ([]byte, error) {

@@ -366,29 +366,36 @@ func (s *Server) handleWakeCheck(ctx context.Context, cc *clientConn, msg Messag
 		}
 	}
 
-	// If the user only said the wake word with no command, acknowledge
-	if strings.TrimSpace(command) == "" || command == lowerText {
-		s.sendMsg(cc, Message{
-			Type:    TypeReply,
-			Payload: map[string]any{KeyText: "Evet, seni dinliyorum?"},
+	// If the user said the wake word WITH a command in the same breath
+	if strings.TrimSpace(command) != "" && command != lowerText {
+		// Process the command directly
+		s.handleTextMessage(ctx, cc, Message{
+			Type:    TypeText,
+			ID:      msg.ID,
+			Payload: map[string]any{KeyText: command},
 		})
-		if s.voiceEngine.HasTTS() {
-			if audio, err := s.voiceEngine.Speak(ctx, "Evet, seni dinliyorum?", nil); err == nil {
-				s.sendMsg(cc, Message{
-					Type:        TypeSpeak,
-					AudioFormat: "mp3",
-					Payload:     map[string]any{"audio_base64": encodeBase64(audio)},
-				})
-			}
-		}
 		return
 	}
 
-	// Process the command part
-	s.handleTextMessage(ctx, cc, Message{
-		Type:    TypeText,
-		ID:      msg.ID,
-		Payload: map[string]any{KeyText: command},
+	// User only said the wake word — acknowledge and tell client to record command
+	s.sendMsg(cc, Message{
+		Type:    TypeReply,
+		Payload: map[string]any{KeyText: "Evet, seni dinliyorum?"},
+	})
+	if s.voiceEngine != nil && s.voiceEngine.HasTTS() {
+		if audio, err := s.voiceEngine.Speak(ctx, "Evet, seni dinliyorum?", nil); err == nil {
+			s.sendMsg(cc, Message{
+				Type:        TypeSpeak,
+				AudioFormat: "mp3",
+				Payload:     map[string]any{"audio_base64": encodeBase64(audio)},
+			})
+		}
+	}
+
+	// Send wake_ack AFTER TTS — client will start recording command
+	s.sendMsg(cc, Message{
+		Type:      "wake_ack",
+		Timestamp: time.Now(),
 	})
 }
 
