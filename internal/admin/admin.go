@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -50,20 +51,22 @@ type StatusProvider struct {
 
 // Server runs the admin web panel.
 type Server struct {
-	cfg        Config
-	configPath string
-	status     *StatusProvider
+	cfg             Config
+	configPath      string
+	integrationsDir string
+	status          *StatusProvider
 }
 
 // NewServer creates an admin panel server.
-func NewServer(cfg Config, configPath string, status *StatusProvider) *Server {
+func NewServer(cfg Config, configPath, integrationsDir string, status *StatusProvider) *Server {
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = "0.0.0.0:8080"
 	}
 	return &Server{
-		cfg:        cfg,
-		configPath: configPath,
-		status:     status,
+		cfg:             cfg,
+		configPath:      configPath,
+		integrationsDir: integrationsDir,
+		status:          status,
 	}
 }
 
@@ -75,6 +78,8 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/status", s.requireAuth(s.handleStatus))
 	mux.HandleFunc("/api/config", s.requireAuth(s.handleConfig))
 	mux.HandleFunc("/api/config/save", s.requireAuth(s.handleConfigSave))
+	mux.HandleFunc("/api/integrations", s.requireAuth(s.handleIntegrations))
+	mux.HandleFunc("/api/integrations/save", s.requireAuth(s.handleIntegrationSave))
 	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
 	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
@@ -264,4 +269,111 @@ func (s *Server) handleBridgeProxy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+}
+
+func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
+	// GET ?name=xxx → return specific integration config
+	// GET → return list of all integration configs
+	name := r.URL.Query().Get("name")
+
+	if name != "" {
+		// Read specific integration config
+		filePath := filepath.Join(s.integrationsDir, name+".yml")
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"error": "not found", "name": name})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"name": name, "raw": string(data)})
+		return
+	}
+
+	// List all integration configs
+	entries, err := os.ReadDir(s.integrationsDir)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+		return
+	}
+
+	type integrationInfo struct {
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+	}
+
+	var integrations []integrationInfo
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yml") {
+			continue
+		}
+		intName := strings.TrimSuffix(e.Name(), ".yml")
+
+		// Read to check if enabled
+		data, _ := os.ReadFile(filepath.Join(s.integrationsDir, e.Name()))
+		var cfg map[string]any
+		yaml.Unmarshal(data, &cfg)
+		enabled, _ := cfg["enabled"].(bool)
+
+		integrations = append(integrations, integrationInfo{
+			Name:    intName,
+			Enabled: enabled,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"integrations": integrations})
+}
+
+func (s *Server) handleIntegrationSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		Name    string `json:"name"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	if payload.Name == "" || payload.Content == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "name and content required"})
+		return
+	}
+
+	// Validate YAML
+	var check map[string]any
+	if err := yaml.Unmarshal([]byte(payload.Content), &check); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid YAML: " + err.Error()})
+		return
+	}
+
+	// Sanitize name — only allow alphanumeric, dash, underscore
+	safeName := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return -1
+	}, payload.Name)
+
+	filePath := filepath.Join(s.integrationsDir, safeName+".yml")
+	if err := os.WriteFile(filePath, []byte(payload.Content), 0o644); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	slog.Info("integration config saved", "name", safeName)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Saved! Integration will hot-reload."})
 }

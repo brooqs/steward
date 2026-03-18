@@ -200,7 +200,7 @@ func main() {
 			Password:   cfg.Admin.Password,
 			BridgeURL:  cfg.Admin.BridgeURL,
 		}
-		adminServer := admin.NewServer(adminCfg, *configPath, adminStatus)
+		adminServer := admin.NewServer(adminCfg, *configPath, cfg.IntegrationsDir, adminStatus)
 		go func() {
 			if err := adminServer.Run(ctx); err != nil && err != http.ErrServerClosed {
 				slog.Error("admin panel error", "error", err)

@@ -323,12 +323,17 @@
       <!-- Integrations -->
       <div class="page" id="page-integrations">
         <h2 class="page-title">Integrations</h2>
-        <div id="integrations-list" class="services">
-          <div class="service-row">
-            <div>
-              <div class="service-name">No integrations loaded</div>
-              <div class="service-detail">Add .yml files to the integrations directory</div>
+        <div id="int-list" class="services"></div>
+        <div id="int-editor" style="display:none; margin-top:20px;">
+          <div class="editor-container">
+            <div class="editor-toolbar">
+              <span id="int-editor-title" style="font-weight:600"></span>
+              <div>
+                <button class="btn btn-sm" onclick="cancelIntEditor()">Cancel</button>
+                <button class="btn btn-primary btn-sm" onclick="saveIntConfig()">Save</button>
+              </div>
             </div>
+            <textarea class="config-editor" id="int-config-editor" spellcheck="false"></textarea>
           </div>
         </div>
       </div>
@@ -501,14 +506,86 @@
     }
 
     let waPoller = null;
+    let currentIntName = '';
+
     document.querySelectorAll('.nav-item').forEach(item => {
       item.addEventListener('click', () => {
         if (waPoller) { clearInterval(waPoller); waPoller = null; }
         if (item.dataset.page === 'whatsapp') {
           waPoller = setInterval(loadWhatsApp, 3000);
         }
+        if (item.dataset.page === 'integrations') {
+          loadIntegrations();
+        }
       });
     });
+
+    // Integrations
+    async function loadIntegrations() {
+      try {
+        const res = await fetch('/api/integrations', { credentials: 'same-origin' });
+        const data = await res.json();
+        const list = document.getElementById('int-list');
+
+        if (!data.integrations || data.integrations.length === 0) {
+          list.innerHTML = '<div class="service-row"><div><div class="service-name">No integrations found</div><div class="service-detail">Add .yml files to the integrations directory</div></div></div>';
+          return;
+        }
+
+        list.innerHTML = data.integrations.map(i => {
+          var badge = i.enabled ? '<span class="badge badge-green">Enabled</span>' : '<span class="badge badge-yellow">Disabled</span>';
+          return '<div class="service-row" style="cursor:pointer" onclick="editIntegration(\'' + i.name + '\')">' +
+            '<div><div class="service-name">' + i.name + '</div><div class="service-detail">Click to edit configuration</div></div>' +
+            badge + '</div>';
+        }).join('');
+      } catch (e) {
+        console.error('Integration load error:', e);
+      }
+    }
+
+    async function editIntegration(name) {
+      try {
+        const res = await fetch('/api/integrations?name=' + encodeURIComponent(name), { credentials: 'same-origin' });
+        const data = await res.json();
+        if (data.error) {
+          showToast('Cannot load: ' + data.error, 'error');
+          return;
+        }
+        currentIntName = name;
+        document.getElementById('int-editor-title').textContent = name + '.yml';
+        document.getElementById('int-config-editor').value = data.raw || '';
+        document.getElementById('int-editor').style.display = 'block';
+      } catch (e) {
+        showToast('Load failed', 'error');
+      }
+    }
+
+    function cancelIntEditor() {
+      document.getElementById('int-editor').style.display = 'none';
+      currentIntName = '';
+    }
+
+    async function saveIntConfig() {
+      var content = document.getElementById('int-config-editor').value;
+      try {
+        const res = await fetch('/api/integrations/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ name: currentIntName, content: content })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(data.message || 'Saved!', 'success');
+          cancelIntEditor();
+          setTimeout(loadIntegrations, 500);
+        } else {
+          showToast(data.error || 'Save failed', 'error');
+        }
+      } catch (e) {
+        showToast('Save failed', 'error');
+      }
+    }
 
     // Init
     loadStatus();
