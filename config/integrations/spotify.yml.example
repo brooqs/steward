@@ -3,7 +3,7 @@
 #
 # Setup:
 # 1. Create an app at https://developer.spotify.com/dashboard
-# 2. Add redirect URI: http://<your-steward-ip>:8080/api/spotify/callback
+# 2. Add redirect URI: http://127.0.0.1:8888/callback
 # 3. Fill in client_id and client_secret below, save, then click
 #    "Connect Spotify" button in the admin panel — it handles OAuth2 automatically.
 #

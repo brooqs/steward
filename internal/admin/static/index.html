@@ -354,7 +354,7 @@
             </div>
             <div style="padding:16px;font-size:14px;line-height:1.8">
               <div style="margin-bottom:12px">
-                <strong>Step 1:</strong> Make sure you added <code style="background:#333;padding:2px 6px;border-radius:4px">http://localhost:8888/callback</code> as a Redirect URI in your <a href="https://developer.spotify.com/dashboard" target="_blank" style="color:#1db954">Spotify Developer Dashboard</a>.
+                <strong>Step 1:</strong> Make sure you added <code style="background:#333;padding:2px 6px;border-radius:4px">http://127.0.0.1:8888/callback</code> as a Redirect URI in your <a href="https://developer.spotify.com/dashboard" target="_blank" style="color:#1db954">Spotify Developer Dashboard</a>.
               </div>
               <div style="margin-bottom:12px">
                 <strong>Step 2:</strong> <button class="btn btn-sm" style="background:#1db954;color:#fff;border:none" onclick="openSpotifyAuth()">Open Spotify Login</button>
@@ -365,7 +365,7 @@
               <div style="margin-bottom:12px">
                 <strong>Step 4:</strong> Paste the URL here:
                 <div style="display:flex;gap:8px;margin-top:8px">
-                  <input type="text" id="spotify-callback-input" placeholder="http://localhost:8888/callback?code=..." style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:8px 12px;color:#fff;font-size:13px">
+                  <input type="text" id="spotify-callback-input" placeholder="http://127.0.0.1:8888/callback?code=..." style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:8px 12px;color:#fff;font-size:13px">
                   <button class="btn btn-primary btn-sm" onclick="submitSpotifyCallback()">Submit</button>
                 </div>
               </div>

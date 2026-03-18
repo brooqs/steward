@@ -448,7 +448,7 @@ func (s *Server) handleIntegrationTemplates(w http.ResponseWriter, r *http.Reque
 
 const (
 	spotifyScopes      = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
-	spotifyRedirectURI = "http://localhost:8888/callback"
+	spotifyRedirectURI = "http://127.0.0.1:8888/callback"
 )
 
 func (s *Server) readSpotifyConfig() (map[string]any, error) {
