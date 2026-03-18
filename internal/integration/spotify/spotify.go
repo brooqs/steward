@@ -161,6 +161,84 @@ func (s *SpotifyIntegration) GetTools() []tools.ToolSpec {
 			Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 			Handler:     s.listDevices,
 		},
+		{
+			Name:        "spotify_my_playlists",
+			Description: "List the user's own Spotify playlists",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Number of playlists to return (default: 10, max: 20)",
+					},
+				},
+			},
+			Handler: s.myPlaylists,
+		},
+		{
+			Name:        "spotify_shuffle",
+			Description: "Toggle shuffle mode on/off for Spotify playback",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"state": map[string]any{
+						"type":        "boolean",
+						"description": "true to enable shuffle, false to disable",
+					},
+				},
+				"required": []string{"state"},
+			},
+			Handler: s.shuffle,
+		},
+		{
+			Name:        "spotify_repeat",
+			Description: "Set repeat mode for Spotify playback",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"state": map[string]any{
+						"type":        "string",
+						"description": "Repeat mode: 'track' (repeat current), 'context' (repeat playlist/album), 'off' (no repeat)",
+						"enum":        []string{"track", "context", "off"},
+					},
+				},
+				"required": []string{"state"},
+			},
+			Handler: s.repeat,
+		},
+		{
+			Name:        "spotify_transfer",
+			Description: "Transfer Spotify playback to a different device",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"device_id": map[string]any{
+						"type":        "string",
+						"description": "ID of the target device (use spotify_devices to find device IDs)",
+					},
+					"play": map[string]any{
+						"type":        "boolean",
+						"description": "Whether to start playing on the new device (default: true)",
+					},
+				},
+				"required": []string{"device_id"},
+			},
+			Handler: s.transferPlayback,
+		},
+		{
+			Name:        "spotify_recently_played",
+			Description: "Get the user's recently played tracks on Spotify",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Number of tracks to return (default: 10, max: 20)",
+					},
+				},
+			},
+			Handler: s.recentlyPlayed,
+		},
 	}
 }
 
@@ -390,6 +468,129 @@ func (s *SpotifyIntegration) listDevices(params map[string]any) (any, error) {
 		})
 	}
 	return map[string]any{"devices": devices}, nil
+}
+
+func (s *SpotifyIntegration) myPlaylists(params map[string]any) (any, error) {
+	limit := 10
+	if l, ok := params["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+		if limit > 20 {
+			limit = 20
+		}
+	}
+
+	path := fmt.Sprintf("/v1/me/playlists?limit=%d", limit)
+	data, err := s.apiGet(path)
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+
+	var result map[string]any
+	json.Unmarshal(data, &result)
+
+	rawItems, _ := result["items"].([]any)
+	var playlists []map[string]any
+	for _, raw := range rawItems {
+		item, _ := raw.(map[string]any)
+		owner, _ := item["owner"].(map[string]any)
+		tracks, _ := item["tracks"].(map[string]any)
+		playlists = append(playlists, map[string]any{
+			"name":        item["name"],
+			"uri":         item["uri"],
+			"owner":       owner["display_name"],
+			"track_count": tracks["total"],
+			"public":      item["public"],
+		})
+	}
+	return map[string]any{"playlists": playlists, "total": result["total"]}, nil
+}
+
+func (s *SpotifyIntegration) shuffle(params map[string]any) (any, error) {
+	state, _ := params["state"].(bool)
+	stateStr := "false"
+	if state {
+		stateStr = "true"
+	}
+	path := "/v1/me/player/shuffle?state=" + stateStr
+	_, err := s.apiPut(path, nil)
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+	return map[string]any{"shuffle": state}, nil
+}
+
+func (s *SpotifyIntegration) repeat(params map[string]any) (any, error) {
+	state, _ := params["state"].(string)
+	if state != "track" && state != "context" && state != "off" {
+		return nil, fmt.Errorf("state must be 'track', 'context', or 'off'")
+	}
+	path := "/v1/me/player/repeat?state=" + state
+	_, err := s.apiPut(path, nil)
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+	return map[string]any{"repeat": state}, nil
+}
+
+func (s *SpotifyIntegration) transferPlayback(params map[string]any) (any, error) {
+	deviceID, _ := params["device_id"].(string)
+	if deviceID == "" {
+		return nil, fmt.Errorf("device_id required")
+	}
+	play := true
+	if p, ok := params["play"].(bool); ok {
+		play = p
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"device_ids": []string{deviceID},
+		"play":       play,
+	})
+	_, err := s.apiPut("/v1/me/player", body)
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+	return map[string]any{"status": "transferred", "device_id": deviceID, "play": play}, nil
+}
+
+func (s *SpotifyIntegration) recentlyPlayed(params map[string]any) (any, error) {
+	limit := 10
+	if l, ok := params["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+		if limit > 20 {
+			limit = 20
+		}
+	}
+
+	path := fmt.Sprintf("/v1/me/player/recently-played?limit=%d", limit)
+	data, err := s.apiGet(path)
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+
+	var result map[string]any
+	json.Unmarshal(data, &result)
+
+	rawItems, _ := result["items"].([]any)
+	var tracks []map[string]any
+	for _, raw := range rawItems {
+		item, _ := raw.(map[string]any)
+		track, _ := item["track"].(map[string]any)
+		if track == nil {
+			continue
+		}
+		album, _ := track["album"].(map[string]any)
+		albumName, _ := album["name"].(string)
+		playedAt, _ := item["played_at"].(string)
+		tracks = append(tracks, map[string]any{
+			"track":     track["name"],
+			"artists":   extractArtists(track),
+			"album":     albumName,
+			"uri":       track["uri"],
+			"played_at": playedAt,
+		})
+	}
+	return map[string]any{"recently_played": tracks}, nil
 }
 
 // ── OAuth2 Token Management ───────────────────────────────────
