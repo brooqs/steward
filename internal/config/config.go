@@ -36,6 +36,9 @@ type Config struct {
 	// Satellite settings
 	Satellite SatelliteConfig `yaml:"satellite"`
 
+	// Admin panel settings
+	Admin AdminConfig `yaml:"admin"`
+
 	// Channel settings
 	Telegram TelegramConfig `yaml:"telegram"`
 	WhatsApp WhatsAppConfig `yaml:"whatsapp"`
@@ -91,6 +94,14 @@ type SatelliteConfig struct {
 	AuthTokens []string `yaml:"auth_tokens"` // allowed satellite tokens
 	TLSCert    string   `yaml:"tls_cert"`
 	TLSKey     string   `yaml:"tls_key"`
+}
+
+// AdminConfig holds admin panel settings.
+type AdminConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	ListenAddr string `yaml:"listen_addr"` // default: 0.0.0.0:8080
+	Username   string `yaml:"username"`    // basic auth username
+	Password   string `yaml:"password"`    // basic auth password
 }
 
 // DefaultConfig returns a Config with safe defaults.

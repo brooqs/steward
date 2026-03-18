@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Steward — Admin Panel</title>
+  <style>
+    :root {
+      --bg: #0f0f14;
+      --surface: #1a1a24;
+      --surface2: #22222e;
+      --border: #2a2a3a;
+      --primary: #6c5ce7;
+      --primary-glow: rgba(108, 92, 231, 0.15);
+      --green: #00b894;
+      --red: #e17055;
+      --yellow: #fdcb6e;
+      --text: #dfe6e9;
+      --text-dim: #636e82;
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* Layout */
+    .app { display: flex; min-height: 100vh; }
+    .sidebar {
+      width: 240px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 24px 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .main { flex: 1; padding: 32px; overflow-y: auto; }
+
+    /* Sidebar */
+    .logo {
+      padding: 0 24px 24px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .logo h1 {
+      font-size: 20px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--primary), #a29bfe);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .logo span { font-size: 11px; color: var(--text-dim); }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 24px;
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+      border-left: 3px solid transparent;
+    }
+    .nav-item:hover { color: var(--text); background: var(--surface2); }
+    .nav-item.active {
+      color: var(--primary);
+      background: var(--primary-glow);
+      border-left-color: var(--primary);
+    }
+    .nav-item .icon { font-size: 18px; width: 24px; text-align: center; }
+
+    /* Cards */
+    .page { display: none; }
+    .page.active { display: block; }
+    .page-title { font-size: 24px; font-weight: 700; margin-bottom: 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+    .card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 8px; }
+    .card-value { font-size: 22px; font-weight: 700; }
+    .card-sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+
+    /* Status badges */
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-green { background: rgba(0,184,148,0.15); color: var(--green); }
+    .badge-yellow { background: rgba(253,203,110,0.15); color: var(--yellow); }
+    .badge-red { background: rgba(225,112,85,0.15); color: var(--red); }
+
+    /* Services list */
+    .services { display: flex; flex-direction: column; gap: 12px; margin-bottom: 32px; }
+    .service-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+    }
+    .service-name { font-weight: 500; }
+    .service-detail { font-size: 13px; color: var(--text-dim); }
+
+    /* Config editor */
+    .editor-container {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .editor-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+    }
+    .editor-toolbar span { font-size: 13px; color: var(--text-dim); }
+    textarea.config-editor {
+      width: 100%;
+      min-height: 500px;
+      background: var(--surface);
+      color: var(--text);
+      border: none;
+      padding: 20px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+    }
+    .btn {
+      padding: 8px 20px;
+      border-radius: 8px;
+      border: none;
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+    .btn-primary:hover { background: #5a4bd1; transform: translateY(-1px); }
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .toast {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 1000;
+      animation: slideIn 0.3s ease;
+      display: none;
+    }
+    .toast.success { background: rgba(0,184,148,0.9); color: white; }
+    .toast.error { background: rgba(225,112,85,0.9); color: white; }
+    @keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar { width: 60px; }
+      .sidebar .logo h1, .sidebar .logo span, .nav-item span:not(.icon) { display: none; }
+      .nav-item { padding: 14px 18px; justify-content: center; }
+      .main { padding: 20px; }
+      .grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="logo">
+        <h1>🤖 Steward</h1>
+        <span>Admin Panel</span>
+      </div>
+      <div class="nav-item active" data-page="dashboard">
+        <span class="icon">📊</span><span>Dashboard</span>
+      </div>
+      <div class="nav-item" data-page="settings">
+        <span class="icon">⚙️</span><span>Settings</span>
+      </div>
+      <div class="nav-item" data-page="integrations">
+        <span class="icon">🔌</span><span>Integrations</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- Dashboard -->
+      <div class="page active" id="page-dashboard">
+        <h2 class="page-title">Dashboard</h2>
+        <div class="grid">
+          <div class="card">
+            <div class="card-label">Status</div>
+            <div class="card-value"><span class="badge badge-green">Running</span></div>
+            <div class="card-sub" id="uptime">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Provider</div>
+            <div class="card-value" id="provider">—</div>
+            <div class="card-sub" id="model">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Tools</div>
+            <div class="card-value" id="tool-count">—</div>
+            <div class="card-sub">registered</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Channel</div>
+            <div class="card-value" id="channel">—</div>
+            <div class="card-sub" id="version">—</div>
+          </div>
+        </div>
+
+        <h3 style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">Services</h3>
+        <div class="services" id="services-list"></div>
+      </div>
+
+      <!-- Settings -->
+      <div class="page" id="page-settings">
+        <h2 class="page-title">Settings</h2>
+        <div class="editor-container">
+          <div class="editor-toolbar">
+            <span>core.yml</span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-secondary" onclick="loadConfig()">↻ Reload</button>
+              <button class="btn btn-primary" onclick="saveConfig()">💾 Save</button>
+            </div>
+          </div>
+          <textarea class="config-editor" id="config-editor" spellcheck="false"></textarea>
+        </div>
+        <p style="margin-top:12px;font-size:12px;color:var(--text-dim);">Changes require a service restart: <code style="background:var(--surface2);padding:2px 6px;border-radius:4px;">systemctl restart steward</code></p>
+      </div>
+
+      <!-- Integrations -->
+      <div class="page" id="page-integrations">
+        <h2 class="page-title">Integrations</h2>
+        <div id="integrations-list" class="services">
+          <div class="service-row">
+            <div>
+              <div class="service-name">No integrations loaded</div>
+              <div class="service-detail">Add .yml files to the integrations directory</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // Navigation
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', () => {
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        item.classList.add('active');
+        document.getElementById('page-' + item.dataset.page).classList.add('active');
+        if (item.dataset.page === 'settings') loadConfig();
+      });
+    });
+
+    // Status polling
+    async function loadStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        document.getElementById('provider').textContent = data.provider || '—';
+        document.getElementById('model').textContent = data.model || '—';
+        document.getElementById('tool-count').textContent = data.tool_count || 0;
+        document.getElementById('channel').textContent = data.channel || '—';
+        document.getElementById('version').textContent = 'v' + (data.version || '?');
+        document.getElementById('uptime').textContent = 'Uptime: ' + (data.uptime_human || '—');
+
+        // Services
+        const services = [];
+        services.push({ name: 'LLM Provider', detail: `${data.provider} / ${data.model}`, status: 'green' });
+        services.push({ name: 'Memory', detail: data.memory_backend, status: 'green' });
+        services.push({ name: 'Voice STT', detail: data.voice_stt || 'disabled', status: data.voice_stt ? 'green' : 'yellow' });
+        services.push({ name: 'Voice TTS', detail: data.voice_tts || 'disabled', status: data.voice_tts ? 'green' : 'yellow' });
+        services.push({ name: 'Satellites', detail: `${data.satellite_count || 0} connected`, status: data.satellite_count > 0 ? 'green' : 'yellow' });
+
+        const list = document.getElementById('services-list');
+        list.innerHTML = services.map(s => `
+          <div class="service-row">
+            <div>
+              <div class="service-name">${s.name}</div>
+              <div class="service-detail">${s.detail}</div>
+            </div>
+            <span class="badge badge-${s.status}">${s.status === 'green' ? 'Active' : 'Inactive'}</span>
+          </div>
+        `).join('');
+
+        // Integrations
+        const intList = document.getElementById('integrations-list');
+        if (data.integrations && data.integrations.length > 0) {
+          intList.innerHTML = data.integrations.map(i => `
+            <div class="service-row">
+              <div class="service-name">${i}</div>
+              <span class="badge badge-green">Loaded</span>
+            </div>
+          `).join('');
+        }
+      } catch (e) {
+        console.error('Status fetch failed:', e);
+      }
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config');
+        const data = await res.json();
+        document.getElementById('config-editor').value = data.raw || '';
+      } catch (e) {
+        showToast('Failed to load config', 'error');
+      }
+    }
+
+    async function saveConfig() {
+      const content = document.getElementById('config-editor').value;
+      try {
+        const res = await fetch('/api/config/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(data.message || 'Saved!', 'success');
+        } else {
+          showToast(data.error || 'Save failed', 'error');
+        }
+      } catch (e) {
+        showToast('Failed to save config', 'error');
+      }
+    }
+
+    function showToast(msg, type) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.className = 'toast ' + type;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 4000);
+    }
+
+    // Init
+    loadStatus();
+    setInterval(loadStatus, 5000);
+  </script>
+</body>
+</html>

@@ -11,10 +11,13 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/brooqs/steward/internal/admin"
 	"github.com/brooqs/steward/internal/channel/telegram"
 	"github.com/brooqs/steward/internal/channel/whatsapp"
 	"github.com/brooqs/steward/internal/config"
@@ -173,6 +176,35 @@ func main() {
 			"addr", satCfg.ListenAddr,
 			"tokens", len(satCfg.AuthTokens),
 		)
+	}
+
+	// Start admin panel if enabled
+	if cfg.Admin.Enabled {
+		adminStatus := &admin.StatusProvider{
+			Version:       version,
+			Uptime:        time.Now(),
+			Provider:      cfg.Provider,
+			Model:         cfg.Model,
+			MemoryBackend: cfg.Memory.Backend,
+			Channel:       *channel,
+			ToolCount:     registry.Count(),
+			Integrations:  loader.ActiveIntegrations(),
+			VoiceSTT:      cfg.Voice.STT.Provider,
+			VoiceTTS:      cfg.Voice.TTS.Provider,
+		}
+		adminCfg := admin.Config{
+			Enabled:    true,
+			ListenAddr: cfg.Admin.ListenAddr,
+			Username:   cfg.Admin.Username,
+			Password:   cfg.Admin.Password,
+		}
+		adminServer := admin.NewServer(adminCfg, *configPath, adminStatus)
+		go func() {
+			if err := adminServer.Run(ctx); err != nil && err != http.ErrServerClosed {
+				slog.Error("admin panel error", "error", err)
+			}
+		}()
+		slog.Info("admin panel enabled", "addr", cfg.Admin.ListenAddr)
 	}
 
 	// Run the selected channel
