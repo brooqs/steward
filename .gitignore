@@ -1,6 +1,6 @@
 # Binary
-steward
-steward-satellite
+/steward
+/steward-satellite
 
 # Go
 vendor/
