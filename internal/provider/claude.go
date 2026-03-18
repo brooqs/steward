@@ -109,11 +109,7 @@ func (c *Claude) ChatCompletion(ctx context.Context, req *Request) (*Response, e
 	// Convert tools
 	var tools []claudeTool
 	for _, t := range req.Tools {
-		tools = append(tools, claudeTool{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.InputSchema,
-		})
+		tools = append(tools, claudeTool(t))
 	}
 
 	body := claudeRequest{
