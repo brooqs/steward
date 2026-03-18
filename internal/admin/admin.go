@@ -310,7 +310,7 @@ func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 
 	var integrations []integrationInfo
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yml") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yml") || strings.HasSuffix(e.Name(), ".yml.example") {
 			continue
 		}
 		intName := strings.TrimSuffix(e.Name(), ".yml")
@@ -319,7 +319,13 @@ func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 		data, _ := os.ReadFile(filepath.Join(s.integrationsDir, e.Name()))
 		var cfg map[string]any
 		yaml.Unmarshal(data, &cfg)
-		enabled, _ := cfg["enabled"].(bool)
+
+		// If enabled key exists, use it; otherwise default to true
+		// (loader treats configs without explicit enabled:false as enabled)
+		enabled := true
+		if v, ok := cfg["enabled"]; ok {
+			enabled, _ = v.(bool)
+		}
 
 		integrations = append(integrations, integrationInfo{
 			Name:    intName,
