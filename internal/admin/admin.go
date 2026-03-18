@@ -85,7 +85,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/integrations/save", s.requireAuth(s.handleIntegrationSave))
 	mux.HandleFunc("/api/integrations/templates", s.requireAuth(s.handleIntegrationTemplates))
 	mux.HandleFunc("/api/spotify/authorize", s.requireAuth(s.handleSpotifyAuth))
-	mux.HandleFunc("/api/spotify/callback", s.handleSpotifyCallback) // no auth — redirect from Spotify
+	mux.HandleFunc("/api/spotify/exchange", s.requireAuth(s.handleSpotifyExchange))
 	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
 	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
@@ -446,7 +446,10 @@ func (s *Server) handleIntegrationTemplates(w http.ResponseWriter, r *http.Reque
 
 // ── Spotify OAuth2 ────────────────────────────────────────────
 
-const spotifyScopes = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
+const (
+	spotifyScopes      = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
+	spotifyRedirectURI = "http://localhost:8888/callback"
+)
 
 func (s *Server) readSpotifyConfig() (map[string]any, error) {
 	data, err := os.ReadFile(filepath.Join(s.integrationsDir, "spotify.yml"))
@@ -475,62 +478,76 @@ func (s *Server) handleSpotifyAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build callback URL from request
-	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		scheme = "https"
-	}
-	redirectURI := fmt.Sprintf("%s://%s/api/spotify/callback", scheme, r.Host)
-
 	authURL := fmt.Sprintf(
 		"https://accounts.spotify.com/authorize?client_id=%s&response_type=code&redirect_uri=%s&scope=%s",
 		clientID,
-		url.QueryEscape(redirectURI),
+		url.QueryEscape(spotifyRedirectURI),
 		url.QueryEscape(spotifyScopes),
 	)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"url": authURL, "redirect_uri": redirectURI})
+	json.NewEncoder(w).Encode(map[string]string{"url": authURL, "redirect_uri": spotifyRedirectURI})
 }
 
-func (s *Server) handleSpotifyCallback(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	errParam := r.URL.Query().Get("error")
-
-	if errParam != "" {
-		s.spotifyResultPage(w, false, "Authorization denied: "+errParam)
+func (s *Server) handleSpotifyExchange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	var payload struct {
+		CallbackURL string `json:"callback_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid json"})
+		return
+	}
+
+	// Parse the code from callback URL
+	parsed, err := url.Parse(payload.CallbackURL)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid URL"})
+		return
+	}
+
+	code := parsed.Query().Get("code")
 	if code == "" {
-		s.spotifyResultPage(w, false, "No authorization code received")
+		errMsg := parsed.Query().Get("error")
+		if errMsg != "" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"error": "Authorization denied: " + errMsg})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "No authorization code found in URL"})
 		return
 	}
 
 	cfg, err := s.readSpotifyConfig()
 	if err != nil {
-		s.spotifyResultPage(w, false, err.Error())
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
 	clientID, _ := cfg["client_id"].(string)
 	clientSecret, _ := cfg["client_secret"].(string)
 	if clientID == "" || clientSecret == "" {
-		s.spotifyResultPage(w, false, "client_id or client_secret missing in spotify.yml")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "client_id or client_secret missing"})
 		return
 	}
-
-	// Build redirect URI
-	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		scheme = "https"
-	}
-	redirectURI := fmt.Sprintf("%s://%s/api/spotify/callback", scheme, r.Host)
 
 	// Exchange code for tokens
 	data := url.Values{
 		"grant_type":   {"authorization_code"},
 		"code":         {code},
-		"redirect_uri": {redirectURI},
+		"redirect_uri": {spotifyRedirectURI},
 	}
 
 	req, _ := http.NewRequest("POST", "https://accounts.spotify.com/api/token",
@@ -542,14 +559,16 @@ func (s *Server) handleSpotifyCallback(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		s.spotifyResultPage(w, false, "Token exchange failed: "+err.Error())
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "Token exchange failed: " + err.Error()})
 		return
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		s.spotifyResultPage(w, false, fmt.Sprintf("Token exchange HTTP %d: %s", resp.StatusCode, string(body)))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Spotify error: %s", string(body))})
 		return
 	}
 
@@ -561,39 +580,25 @@ func (s *Server) handleSpotifyCallback(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(body, &tokenResp)
 
 	if tokenResp.RefreshToken == "" {
-		s.spotifyResultPage(w, false, "No refresh_token received from Spotify")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "No refresh_token received"})
 		return
 	}
 
-	// Update spotify.yml with the refresh token
+	// Save refresh token to spotify.yml
 	cfg["refresh_token"] = tokenResp.RefreshToken
 	cfg["enabled"] = true
 
 	yamlData, _ := yaml.Marshal(cfg)
 	spotifyPath := filepath.Join(s.integrationsDir, "spotify.yml")
 	if err := os.WriteFile(spotifyPath, yamlData, 0o644); err != nil {
-		s.spotifyResultPage(w, false, "Failed to save config: "+err.Error())
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save: " + err.Error()})
 		return
 	}
 
 	slog.Info("spotify oauth2 completed", "refresh_token_length", len(tokenResp.RefreshToken))
-	s.spotifyResultPage(w, true, "Spotify connected! Integration will auto-load.")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Spotify connected! Integration will hot-reload."})
 }
 
-func (s *Server) spotifyResultPage(w http.ResponseWriter, success bool, message string) {
-	emoji := "❌"
-	color := "#ff4444"
-	if success {
-		emoji = "✅"
-		color = "#44ff44"
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html><head><title>Spotify Auth</title>
-<style>body{background:#0a0a0a;color:#fff;font-family:-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
-.box{text-align:center;padding:40px;border-radius:16px;background:#1a1a1a;border:1px solid #333}
-.emoji{font-size:48px;margin-bottom:16px}.msg{color:%s;font-size:18px;margin-bottom:16px}
-a{color:#1db954;text-decoration:none}</style></head>
-<body><div class="box"><div class="emoji">%s</div><div class="msg">%s</div>
-<a href="/">← Back to Admin Panel</a></div></body></html>`, color, emoji, message)
-}

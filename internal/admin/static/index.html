@@ -570,14 +570,41 @@
       try {
         const res = await fetch('/api/spotify/authorize', { credentials: 'same-origin' });
         const data = await res.json();
-        if (data.error) {
-          showToast(data.error, 'error');
-          return;
-        }
-        if (data.url) {
-          showToast('Redirecting to Spotify...', 'success');
-          window.open(data.url, '_blank');
-        }
+        if (data.error) { showToast(data.error, 'error'); return; }
+        if (!data.url) return;
+
+        // Open Spotify auth in new tab
+        window.open(data.url, '_blank');
+
+        // Wait a moment, then prompt for callback URL
+        setTimeout(async () => {
+          const callbackUrl = prompt(
+            'Spotify auth opened in new tab.\n\n' +
+            '1. Log in & authorize the app\n' +
+            '2. You will be redirected to a page that won\'t load (localhost)\n' +
+            '3. Copy the FULL URL from the address bar\n' +
+            '4. Paste it below:'
+          );
+          if (!callbackUrl) return;
+
+          try {
+            const exRes = await fetch('/api/spotify/exchange', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ callback_url: callbackUrl })
+            });
+            const exData = await exRes.json();
+            if (exRes.ok && exData.message) {
+              showToast(exData.message, 'success');
+              setTimeout(loadIntegrations, 500);
+            } else {
+              showToast(exData.error || 'Exchange failed', 'error');
+            }
+          } catch (e) {
+            showToast('Exchange failed', 'error');
+          }
+        }, 2000);
       } catch (e) {
         showToast('Failed to start Spotify auth', 'error');
       }
