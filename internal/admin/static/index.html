@@ -542,12 +542,33 @@
 
         list.innerHTML = data.integrations.map(i => {
           var badge = i.enabled ? '<span class="badge badge-green">Enabled</span>' : '<span class="badge badge-yellow">Disabled</span>';
+          var connectBtn = '';
+          if (i.name === 'spotify' && !i.enabled) {
+            connectBtn = '<button class="btn btn-sm" style="background:#1db954;color:#fff;margin-right:8px;border:none;font-size:12px" onclick="event.stopPropagation();connectSpotify()">🔗 Connect Spotify</button>';
+          }
           return '<div class="service-row" style="cursor:pointer" onclick="editIntegration(\'' + i.name + '\')">' +
             '<div><div class="service-name">' + i.name + '</div><div class="service-detail">Click to edit configuration</div></div>' +
-            badge + '</div>';
+            '<div style="display:flex;align-items:center;gap:8px">' + connectBtn + badge + '</div></div>';
         }).join('');
       } catch (e) {
         console.error('Integration load error:', e);
+      }
+    }
+
+    async function connectSpotify() {
+      try {
+        const res = await fetch('/api/spotify/authorize', { credentials: 'same-origin' });
+        const data = await res.json();
+        if (data.error) {
+          showToast(data.error, 'error');
+          return;
+        }
+        if (data.url) {
+          showToast('Redirecting to Spotify...', 'success');
+          window.open(data.url, '_blank');
+        }
+      } catch (e) {
+        showToast('Failed to start Spotify auth', 'error');
       }
     }
 
