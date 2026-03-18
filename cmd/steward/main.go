@@ -222,7 +222,7 @@ func main() {
 		}
 
 	case "whatsapp":
-		ch, err := whatsapp.New(steward, cfg.WhatsApp)
+		ch, err := whatsapp.New(steward, cfg.WhatsApp, voiceEngine)
 		if err != nil {
 			slog.Error("failed to create whatsapp channel", "error", err)
 			os.Exit(1)

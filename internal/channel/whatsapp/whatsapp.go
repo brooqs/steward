@@ -6,6 +6,7 @@ package whatsapp
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,19 +17,21 @@ import (
 
 	"github.com/brooqs/steward/internal/config"
 	"github.com/brooqs/steward/internal/core"
+	"github.com/brooqs/steward/internal/voice"
 )
 
 // Channel handles WhatsApp communication via webhook.
 type Channel struct {
-	steward   *core.Steward
-	listenAddr string
-	bridgeURL  string
-	secret     string
-	httpClient *http.Client
+	steward     *core.Steward
+	voiceEngine *voice.Engine
+	listenAddr  string
+	bridgeURL   string
+	secret      string
+	httpClient  *http.Client
 }
 
 // New creates a new WhatsApp channel.
-func New(steward *core.Steward, cfg config.WhatsAppConfig) (*Channel, error) {
+func New(steward *core.Steward, cfg config.WhatsAppConfig, ve *voice.Engine) (*Channel, error) {
 	if cfg.BridgeURL == "" {
 		return nil, fmt.Errorf("whatsapp bridge_url not set")
 	}
@@ -37,11 +40,12 @@ func New(steward *core.Steward, cfg config.WhatsAppConfig) (*Channel, error) {
 		addr = "0.0.0.0:8765"
 	}
 	return &Channel{
-		steward:    steward,
-		listenAddr: addr,
-		bridgeURL:  strings.TrimRight(cfg.BridgeURL, "/"),
-		secret:     cfg.WebhookSecret,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		steward:     steward,
+		voiceEngine: ve,
+		listenAddr:  addr,
+		bridgeURL:   strings.TrimRight(cfg.BridgeURL, "/"),
+		secret:      cfg.WebhookSecret,
+		httpClient:  &http.Client{Timeout: 15 * time.Second},
 	}, nil
 }
 
@@ -74,8 +78,10 @@ func (ch *Channel) Run(ctx context.Context) error {
 }
 
 type webhookPayload struct {
-	From    string `json:"from"`
-	Message string `json:"message"`
+	From          string `json:"from"`
+	Message       string `json:"message"`
+	AudioBase64   string `json:"audio_base64,omitempty"`
+	AudioMimetype string `json:"audio_mimetype,omitempty"`
 }
 
 func (ch *Channel) handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -100,20 +106,82 @@ func (ch *Channel) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sender := strings.TrimSpace(payload.From)
+	if sender == "" {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ignored"))
+		return
+	}
+
+	// Voice message → STT
+	if payload.AudioBase64 != "" {
+		slog.Info("whatsapp voice message", "from", sender)
+		go ch.processVoiceAndReply(sender, payload.AudioBase64, payload.AudioMimetype)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+		return
+	}
+
+	// Text message
 	text := strings.TrimSpace(payload.Message)
-	if sender == "" || text == "" {
+	if text == "" {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ignored"))
 		return
 	}
 
 	slog.Info("whatsapp message", "from", sender, "text", truncate(text, 80))
-
-	// Process async and return 200 immediately
 	go ch.processAndReply(sender, text)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
+}
+
+func (ch *Channel) processVoiceAndReply(sender, audioB64, mimetype string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	// Check if STT is available
+	if ch.voiceEngine == nil || !ch.voiceEngine.HasSTT() {
+		ch.sendReply(sender, "Sesli mesaj desteği aktif değil. Lütfen yazılı mesaj gönderin.")
+		return
+	}
+
+	// Decode base64 audio
+	audioData, err := base64.StdEncoding.DecodeString(audioB64)
+	if err != nil {
+		slog.Error("voice decode error", "error", err)
+		ch.sendReply(sender, "Sesli mesaj okunamadı.")
+		return
+	}
+
+	// Determine format from mimetype (audio/ogg; codecs=opus → ogg)
+	format := "ogg"
+	if strings.Contains(mimetype, "mp4") || strings.Contains(mimetype, "m4a") {
+		format = "mp4"
+	} else if strings.Contains(mimetype, "webm") {
+		format = "webm"
+	} else if strings.Contains(mimetype, "wav") {
+		format = "wav"
+	}
+
+	// Transcribe
+	text, err := ch.voiceEngine.Transcribe(ctx, audioData, format)
+	if err != nil {
+		slog.Error("STT error", "error", err)
+		ch.sendReply(sender, "Sesli mesaj anlaşılamadı, tekrar deneyin.")
+		return
+	}
+
+	text = strings.TrimSpace(text)
+	if text == "" {
+		ch.sendReply(sender, "Sesli mesajda konuşma algılanamadı.")
+		return
+	}
+
+	slog.Info("voice transcribed", "from", sender, "text", truncate(text, 80))
+
+	// Process transcribed text as a regular message
+	ch.processAndReply(sender, text)
 }
 
 func (ch *Channel) processAndReply(sender, text string) {

@@ -59,17 +59,41 @@ client.on('disconnected', (reason) => {
 
 // Forward incoming messages to Steward
 client.on('message', async (msg) => {
-  if (msg.isStatus || !msg.body || msg.body.trim() === '') return;
+  if (msg.isStatus) return;
 
   const from = msg.from;
-  const text = msg.body.trim();
   state.messageCount++;
-
-  console.log('📩 ' + from + ': ' + text.substring(0, 80));
 
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (WEBHOOK_SECRET) headers['X-Webhook-Secret'] = WEBHOOK_SECRET;
+
+    // Voice message (ptt = push-to-talk voice note, audio = audio file)
+    if (msg.hasMedia && (msg.type === 'ptt' || msg.type === 'audio')) {
+      console.log('🎤 ' + from + ': [voice message]');
+
+      const media = await msg.downloadMedia();
+      if (media && media.data) {
+        const res = await fetch(STEWARD_URL + '/message', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            from,
+            message: '',
+            audio_base64: media.data,
+            audio_mimetype: media.mimetype || 'audio/ogg'
+          })
+        });
+        console.log('→ Steward (voice): ' + res.status);
+      }
+      return;
+    }
+
+    // Text message
+    const text = (msg.body || '').trim();
+    if (!text) return;
+
+    console.log('📩 ' + from + ': ' + text.substring(0, 80));
 
     const res = await fetch(STEWARD_URL + '/message', {
       method: 'POST',
