@@ -345,6 +345,33 @@
             <textarea class="config-editor" id="int-config-editor" spellcheck="false"></textarea>
           </div>
         </div>
+        <!-- Spotify Connect Panel -->
+        <div id="spotify-connect-panel" style="display:none; margin-top:20px;">
+          <div class="editor-container">
+            <div class="editor-toolbar">
+              <span style="font-weight:600">🔗 Connect Spotify</span>
+              <button class="btn btn-sm" onclick="document.getElementById('spotify-connect-panel').style.display='none'">Cancel</button>
+            </div>
+            <div style="padding:16px;font-size:14px;line-height:1.8">
+              <div style="margin-bottom:12px">
+                <strong>Step 1:</strong> Make sure you added <code style="background:#333;padding:2px 6px;border-radius:4px">http://localhost:8888/callback</code> as a Redirect URI in your <a href="https://developer.spotify.com/dashboard" target="_blank" style="color:#1db954">Spotify Developer Dashboard</a>.
+              </div>
+              <div style="margin-bottom:12px">
+                <strong>Step 2:</strong> <button class="btn btn-sm" style="background:#1db954;color:#fff;border:none" onclick="openSpotifyAuth()">Open Spotify Login</button>
+              </div>
+              <div style="margin-bottom:12px">
+                <strong>Step 3:</strong> After authorizing, you'll be redirected to a page that <em>won't load</em> (localhost). That's normal! Copy the <strong>full URL</strong> from the address bar.
+              </div>
+              <div style="margin-bottom:12px">
+                <strong>Step 4:</strong> Paste the URL here:
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <input type="text" id="spotify-callback-input" placeholder="http://localhost:8888/callback?code=..." style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:8px 12px;color:#fff;font-size:13px">
+                  <button class="btn btn-primary btn-sm" onclick="submitSpotifyCallback()">Submit</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -567,46 +594,41 @@
     }
 
     async function connectSpotify() {
+      document.getElementById('spotify-connect-panel').style.display = 'block';
+      document.getElementById('spotify-callback-input').value = '';
+    }
+
+    async function openSpotifyAuth() {
       try {
         const res = await fetch('/api/spotify/authorize', { credentials: 'same-origin' });
         const data = await res.json();
         if (data.error) { showToast(data.error, 'error'); return; }
-        if (!data.url) return;
-
-        // Open Spotify auth in new tab
-        window.open(data.url, '_blank');
-
-        // Wait a moment, then prompt for callback URL
-        setTimeout(async () => {
-          const callbackUrl = prompt(
-            'Spotify auth opened in new tab.\n\n' +
-            '1. Log in & authorize the app\n' +
-            '2. You will be redirected to a page that won\'t load (localhost)\n' +
-            '3. Copy the FULL URL from the address bar\n' +
-            '4. Paste it below:'
-          );
-          if (!callbackUrl) return;
-
-          try {
-            const exRes = await fetch('/api/spotify/exchange', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              body: JSON.stringify({ callback_url: callbackUrl })
-            });
-            const exData = await exRes.json();
-            if (exRes.ok && exData.message) {
-              showToast(exData.message, 'success');
-              setTimeout(loadIntegrations, 500);
-            } else {
-              showToast(exData.error || 'Exchange failed', 'error');
-            }
-          } catch (e) {
-            showToast('Exchange failed', 'error');
-          }
-        }, 2000);
+        if (data.url) window.open(data.url, '_blank');
       } catch (e) {
-        showToast('Failed to start Spotify auth', 'error');
+        showToast('Failed to get auth URL', 'error');
+      }
+    }
+
+    async function submitSpotifyCallback() {
+      const callbackUrl = document.getElementById('spotify-callback-input').value.trim();
+      if (!callbackUrl) { showToast('Please paste the callback URL', 'error'); return; }
+      try {
+        const res = await fetch('/api/spotify/exchange', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ callback_url: callbackUrl })
+        });
+        const data = await res.json();
+        if (res.ok && data.message) {
+          showToast(data.message, 'success');
+          document.getElementById('spotify-connect-panel').style.display = 'none';
+          setTimeout(loadIntegrations, 500);
+        } else {
+          showToast(data.error || 'Exchange failed', 'error');
+        }
+      } catch (e) {
+        showToast('Exchange failed', 'error');
       }
     }
 
