@@ -1,0 +1,33 @@
+[Unit]
+Description=Steward AI Personal Assistant
+Documentation=https://github.com/brooqs/steward
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=steward
+Group=steward
+ExecStart=/usr/local/bin/steward --config /etc/steward/core.yml --channel telegram
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=10
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/steward
+
+# Environment
+Environment=STEWARD_LOG_LEVEL=info
+EnvironmentFile=-/etc/steward/env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=steward
+
+[Install]
+WantedBy=multi-user.target
