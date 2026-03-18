@@ -80,6 +80,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/config/save", s.requireAuth(s.handleConfigSave))
 	mux.HandleFunc("/api/integrations", s.requireAuth(s.handleIntegrations))
 	mux.HandleFunc("/api/integrations/save", s.requireAuth(s.handleIntegrationSave))
+	mux.HandleFunc("/api/integrations/templates", s.requireAuth(s.handleIntegrationTemplates))
 	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
 	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
@@ -376,4 +377,49 @@ func (s *Server) handleIntegrationSave(w http.ResponseWriter, r *http.Request) {
 	slog.Info("integration config saved", "name", safeName)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Saved! Integration will hot-reload."})
+}
+
+func (s *Server) handleIntegrationTemplates(w http.ResponseWriter, r *http.Request) {
+	// Look for .yml.example files in the integrations dir AND the source config dir
+	// Also check a "templates" subdirectory
+	searchDirs := []string{s.integrationsDir}
+
+	type templateInfo struct {
+		Name    string `json:"name"`
+		Content string `json:"content"`
+	}
+
+	var templates []templateInfo
+	seen := make(map[string]bool)
+
+	for _, dir := range searchDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".yml.example") {
+				continue
+			}
+			name := strings.TrimSuffix(e.Name(), ".yml.example")
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+
+			// Skip if already configured (non-example .yml exists)
+			if _, err := os.Stat(filepath.Join(s.integrationsDir, name+".yml")); err == nil {
+				continue
+			}
+
+			data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err != nil {
+				continue
+			}
+			templates = append(templates, templateInfo{Name: name, Content: string(data)})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"templates": templates})
 }

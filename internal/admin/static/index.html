@@ -322,7 +322,15 @@
 
       <!-- Integrations -->
       <div class="page" id="page-integrations">
-        <h2 class="page-title">Integrations</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+          <h2 class="page-title" style="margin:0">Integrations</h2>
+          <div style="position:relative">
+            <button class="btn btn-primary btn-sm" onclick="showTemplates()" id="add-int-btn">+ Add Integration</button>
+            <div id="template-dropdown" style="display:none; position:absolute; right:0; top:38px; background:var(--surface); border:1px solid var(--border); border-radius:8px; min-width:200px; box-shadow:0 4px 12px rgba(0,0,0,.3); z-index:10;">
+              <div id="template-list" style="padding:4px"></div>
+            </div>
+          </div>
+        </div>
         <div id="int-list" class="services"></div>
         <div id="int-editor" style="display:none; margin-top:20px;">
           <div class="editor-container">
@@ -585,6 +593,49 @@
       } catch (e) {
         showToast('Save failed', 'error');
       }
+    }
+
+    // Templates
+    let templateCache = null;
+    async function showTemplates() {
+      const dd = document.getElementById('template-dropdown');
+      if (dd.style.display !== 'none') { dd.style.display = 'none'; return; }
+
+      try {
+        const res = await fetch('/api/integrations/templates', { credentials: 'same-origin' });
+        const data = await res.json();
+        templateCache = data.templates || [];
+
+        const list = document.getElementById('template-list');
+        if (templateCache.length === 0) {
+          list.innerHTML = '<div style="padding:12px; color:var(--muted); font-size:13px">All integrations already configured</div>';
+        } else {
+          list.innerHTML = templateCache.map((t, i) =>
+            '<div style="padding:8px 12px; cursor:pointer; border-radius:6px; font-size:14px" ' +
+            'onmouseover="this.style.background=\'var(--border)\'" onmouseout="this.style.background=\'transparent\'" ' +
+            'onclick="addFromTemplate(' + i + ')">' + t.name + '</div>'
+          ).join('');
+        }
+        dd.style.display = 'block';
+        document.addEventListener('click', closeTemplateDD, { once: true, capture: true });
+      } catch (e) {
+        showToast('Failed to load templates', 'error');
+      }
+    }
+
+    function closeTemplateDD(e) {
+      if (!e.target.closest('#template-dropdown') && e.target.id !== 'add-int-btn') {
+        document.getElementById('template-dropdown').style.display = 'none';
+      }
+    }
+
+    function addFromTemplate(idx) {
+      const t = templateCache[idx];
+      document.getElementById('template-dropdown').style.display = 'none';
+      currentIntName = t.name;
+      document.getElementById('int-editor-title').textContent = t.name + '.yml (new)';
+      document.getElementById('int-config-editor').value = t.content;
+      document.getElementById('int-editor').style.display = 'block';
     }
 
     // Init
