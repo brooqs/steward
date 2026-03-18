@@ -1,21 +1,26 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-.venv/
-*.egg-info/
-dist/
-build/
+# Binary
+steward
+steward-satellite
 
-# Steward runtime
+# Go
+vendor/
+dist/
+
+# Runtime data
 data/
-.env
+*.db
 *.log
 
 # Config (real, not examples)
 config/core.yml
 config/integrations/*.yml
 !config/integrations/*.yml.example
+
+# ONNX models
+models/*.onnx
+
+# Environment
+.env
 
 # OS
 .DS_Store

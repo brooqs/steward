@@ -1,20 +1,15 @@
-version: "3.9"
-
 services:
   steward:
     build: .
     container_name: steward
     restart: unless-stopped
     env_file:
-      - .env          # optional: set ANTHROPIC_API_KEY, TELEGRAM_TOKEN here
+      - .env
     volumes:
-      - ./config:/app/config:ro       # mount config directory (read-only)
-      - steward_data:/app/data        # persist SQLite database
-    environment:
-      - STEWARD_CONFIG=/app/config/core.yml
-      - STEWARD_INTEGRATIONS_CONFIG=/app/config/integrations
-    # Uncomment below for WhatsApp webhook channel:
-    # command: python -m channels.whatsapp
+      - ./config:/app/config:ro
+      - steward_data:/app/data
+    # Uncomment for WhatsApp webhook channel:
+    # command: ["--config", "/app/config/core.yml", "--channel", "whatsapp"]
     # ports:
     #   - "8765:8765"
 

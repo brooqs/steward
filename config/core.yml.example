@@ -1,20 +1,83 @@
 # Steward Core Configuration
-# Copy this file and fill in your values.
+# Copy to core.yml and fill in your values.
 
-# ── Anthropic / Claude ────────────────────────────────────────────────────────
-anthropic_api_key: ""          # or set ANTHROPIC_API_KEY env var
-model: "claude-3-5-sonnet-20241022"
+# ── LLM Provider ─────────────────────────────────────────────────────────────
+# Supported: claude | openai | groq | gemini | ollama | openrouter
+provider: "claude"
+api_key: ""                  # or set STEWARD_API_KEY / ANTHROPIC_API_KEY env
+model: "claude-sonnet-4-5"
 max_tokens: 4096
+# base_url: ""               # custom URL for ollama/openrouter
 
 # ── System Prompt ─────────────────────────────────────────────────────────────
 system_prompt: |
   You are Steward, a helpful AI personal assistant.
-  You have access to smart home controls, media, and download tools.
+  You have access to smart home controls, media, downloads, and system management tools.
   Be concise, accurate, and friendly. When using tools, explain what you did.
 
 # ── Memory ────────────────────────────────────────────────────────────────────
-db_path: "data/memory.db"
-max_history_messages: 50
+memory:
+  backend: "badger"          # badger | postgres
+  data_dir: "data/badger"
+  short_term_limit: 10
+  # postgres_url: "postgres://user:pass@localhost/steward?sslmode=disable"
+  embedding:
+    enabled: false
+    provider: "local"        # local (ONNX) | openai | ollama
+    model: "all-MiniLM-L6-v2"
 
-# ── Telegram Channel ──────────────────────────────────────────────────────────
-telegram_token: ""             # or set TELEGRAM_TOKEN env var
+# ── Shell Tool ────────────────────────────────────────────────────────────────
+shell:
+  enabled: false             # SECURITY: explicitly enable if needed
+  timeout: 30
+  max_output_bytes: 65536
+  blocked_commands:
+    - "rm -rf /"
+    - "rm -rf /*"
+    - "mkfs"
+    - "dd"
+    - "shutdown"
+    - "reboot"
+  # allowed_dirs: []         # restrict to specific directories
+
+# ── Voice (STT / TTS) ─────────────────────────────────────────────────────────
+voice:
+  stt:
+    provider: ""             # groq | openai | local (empty = disabled)
+    api_key: ""              # for groq/openai
+    model: ""                # whisper-large-v3-turbo (groq) | whisper-1 (openai)
+    # Local whisper.cpp settings:
+    # binary_path: "whisper-cpp"
+    # model_path: "models/ggml-base.bin"
+    # language: "auto"
+    # threads: 4
+  tts:
+    provider: ""             # openai | elevenlabs | piper (empty = disabled)
+    api_key: ""              # for openai/elevenlabs
+    model: ""                # tts-1 (openai) | eleven_multilingual_v2 (elevenlabs)
+    voice: ""                # voice ID
+    # Local piper settings:
+    # binary_path: "piper"
+    # model_path: "models/en_US-lessac-medium.onnx"
+
+# ── Telegram ──────────────────────────────────────────────────────────────────
+telegram:
+  token: ""                  # or set TELEGRAM_TOKEN env
+  # allowed_ids: []          # restrict to specific user/chat IDs
+
+# ── WhatsApp ──────────────────────────────────────────────────────────────────
+whatsapp:
+  listen_addr: "0.0.0.0:8765"
+  bridge_url: "http://localhost:3000"
+  # webhook_secret: ""       # shared secret with bridge
+
+# ── Satellite Server ──────────────────────────────────────────────────────────
+satellite:
+  enabled: false
+  listen_addr: "0.0.0.0:9090"
+  auth_tokens: []             # tokens that satellite clients must present
+  # tls_cert: ""              # for encrypted communication
+  # tls_key: ""
+
+# ── Integrations ──────────────────────────────────────────────────────────────
+integrations_dir: "config/integrations"

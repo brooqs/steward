@@ -1,5 +1,3 @@
 # Jellyfin Integration
-# Copy to jellyfin.yml and fill in your values.
-
 url: "http://jellyfin.local:8096"
-api_key: "your-jellyfin-api-key-here"
+api_key: "your-jellyfin-api-key"

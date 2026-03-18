@@ -1,5 +1,3 @@
 # Home Assistant Integration
-# Copy to homeassistant.yml and fill in your values.
-
 url: "http://homeassistant.local:8123"
-token: "your-long-lived-access-token-here"
+token: "your-long-lived-access-token"

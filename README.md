@@ -1,94 +1,48 @@
 # Steward — AI Personal Assistant
 
-> Developed entirely autonomously by AI, in honor of Dario Amodei's principled stand for safe and independent AI.
-> Built with Claude by Anthropic — by choice, not by chance. All contributions are welcome.
-
-Steward is a modular, self-hosted AI personal assistant that uses the
-**Anthropic Claude API** as its brain. It connects to your smart home,
-media server, and download client — all through a chat interface on
-Telegram or WhatsApp.
+> A self-hosted, modular AI assistant built in Go. Runs as a single binary.
+> Supports multiple LLM providers, smart home integrations, and chat channels.
 
 ---
 
 ## Features
 
-- **Claude-powered** — `claude-3-5-sonnet-20241022` out of the box
-- **Persistent memory** — SQLite-backed conversation history per user/session
-- **Tool use** — Native Claude tool-use for real actions (not just text)
-- **Pluggable integrations** — Home Assistant, Jellyfin, qBittorrent
-- **Pluggable channels** — Telegram (ready), WhatsApp (webhook adapter)
-- **Docker-first** — single `docker compose up` deployment
-- **Fault-isolated** — each integration has its own config; one broken config never takes down the others
-
----
-
-## Architecture
-
-```
-steward/
-├── steward/
-│   ├── core.py            # Main agent loop, Claude API
-│   ├── memory.py          # SQLite conversation memory
-│   ├── tools.py           # Tool registry & dispatcher
-│   └── integrations/
-│       ├── base.py        # Abstract base integration
-│       ├── homeassistant.py
-│       ├── jellyfin.py
-│       └── qbittorrent.py
-├── channels/
-│   ├── telegram.py        # Telegram bot (python-telegram-bot v20)
-│   └── whatsapp.py        # WhatsApp webhook adapter
-├── config/
-│   ├── core.yml           # API keys, model, system prompt
-│   └── integrations/
-│       ├── homeassistant.yml.example
-│       ├── jellyfin.yml.example
-│       └── qbittorrent.yml.example
-├── Dockerfile
-├── docker-compose.yml
-├── install.sh
-└── requirements.txt
-```
+- **Multi-Provider** — Claude, OpenAI, Groq, Gemini, Ollama, OpenRouter
+- **Smart Memory** — BadgerDB-backed conversation history (PostgreSQL optional)
+- **Tool Use** — Native LLM function calling for real actions
+- **Shell Access** — Execute system commands (security-hardened, disabled by default)
+- **Pluggable Integrations** — Home Assistant, Jellyfin, qBittorrent
+- **Hot-Reload** — Add/remove integrations without restarting
+- **Chat Channels** — Telegram, WhatsApp
+- **Security-First** — User whitelisting, command blocklist, webhook secrets
+- **Single Binary** — No runtime dependencies, cross-platform
 
 ---
 
 ## Quick Start
 
-### Option A — Docker (recommended)
+### Build & Run (Native)
 
 ```bash
-# 1. Clone
-git clone https://github.com/brooqs/steward.git && cd steward
+# Build
+go build -o steward ./cmd/steward
 
-# 2. Configure
-#    Edit config/core.yml — add anthropic_api_key and telegram_token
-#    Copy and edit any integration configs you want to enable:
-cp config/integrations/homeassistant.yml.example config/integrations/homeassistant.yml
-# then fill in url + token
+# Configure
+cp config/core.yml.example config/core.yml
+# Edit config/core.yml — add API key, Telegram token, etc.
 
-# 3. Run
+# Run
+./steward --config config/core.yml --channel telegram
+```
+
+### Docker (Optional)
+
+```bash
+cp config/core.yml.example config/core.yml
+# Edit config/core.yml
+
 docker compose up -d
-
-# 4. Logs
 docker compose logs -f steward
-```
-
-### Option B — One-command installer
-
-```bash
-curl -sSL https://raw.githubusercontent.com/brooqs/steward/main/install.sh | bash
-```
-
-### Option C — Manual Python
-
-```bash
-git clone https://github.com/brooqs/steward.git && cd steward
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-mkdir -p data
-
-# Edit config/core.yml then:
-python -m channels.telegram
 ```
 
 ---
@@ -99,86 +53,81 @@ python -m channels.telegram
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `anthropic_api_key` | Anthropic API key | env `ANTHROPIC_API_KEY` |
-| `model` | Claude model ID | `claude-3-5-sonnet-20241022` |
-| `max_tokens` | Max response tokens | `4096` |
-| `system_prompt` | Persona for Claude | See file |
-| `telegram_token` | Telegram bot token | env `TELEGRAM_TOKEN` |
-| `db_path` | SQLite database path | `data/memory.db` |
-| `max_history_messages` | Messages kept per session | `50` |
+| `provider` | LLM provider | `claude` |
+| `api_key` | Provider API key | env `STEWARD_API_KEY` |
+| `model` | Model ID | `claude-sonnet-4-5` |
+| `base_url` | Custom endpoint (Ollama, etc.) | — |
+| `memory.backend` | Storage backend | `badger` |
+| `shell.enabled` | Enable shell tool | `false` |
+| `telegram.token` | Telegram bot token | env `TELEGRAM_TOKEN` |
+| `telegram.allowed_ids` | Authorized user/chat IDs | `[]` (all) |
 
-You can also set values via environment variables. A `.env` file is
-supported by Docker Compose automatically.
+### Integrations
 
----
-
-## Integrations
-
-Enable an integration by copying its `.yml.example` file and filling in
-the credentials:
+Enable an integration by copying its example config:
 
 ```bash
 cp config/integrations/homeassistant.yml.example config/integrations/homeassistant.yml
+# Edit and fill in credentials
 ```
 
-### Home Assistant
-
-```yaml
-url: "http://homeassistant.local:8123"
-token: "your-long-lived-access-token"
-```
-
-**Tools exposed:** `ha_get_entity_state`, `ha_call_service`, `ha_list_entities`
+**Hot-reload**: Add or remove YAML files while Steward is running — integrations load/unload automatically.
 
 ---
 
-## Channels
+## Supported Providers
 
-### Telegram
+| Provider | Tool Use | Config |
+|----------|----------|--------|
+| **Claude** (Anthropic) | ✅ | `provider: claude` |
+| **OpenAI** | ✅ | `provider: openai` |
+| **Groq** | ✅ | `provider: groq` |
+| **Gemini** (Google) | ✅ | `provider: gemini` |
+| **Ollama** (Local) | ✅ | `provider: ollama`, `base_url: http://localhost:11434/v1` |
+| **OpenRouter** | ✅ | `provider: openrouter` |
 
-1. Create a bot via [@BotFather](https://t.me/BotFather)
-2. Add the token to `config/core.yml` → `telegram_token`
-3. Start Steward — message your bot
+---
 
-**Bot commands:**
-- `/start` — welcome message
-- `/clear` — wipe your conversation history
-- `/status` — list active tools
+## Security
 
-### WhatsApp
+- **Telegram whitelisting**: Set `telegram.allowed_ids` to restrict access
+- **Shell tool**: Disabled by default, has command blocklist and timeout
+- **WhatsApp webhook secret**: Set `whatsapp.webhook_secret` for validation
+- **Integration isolation**: Each integration has its own config; broken configs don't affect others
 
-Requires a `whatsapp-web.js` bridge running locally. See
-`channels/whatsapp.py` for details on setup. Then:
+---
 
-```bash
-WA_BRIDGE_URL=http://localhost:3000 python -m channels.whatsapp
+## Architecture
+
+```
+cmd/steward/main.go           → Entry point, CLI, wiring
+internal/
+├── config/                    → YAML + env config loader
+├── provider/                  → LLM adapters (Claude, OpenAI, Gemini)
+├── core/                      → Agent loop (provider-agnostic)
+├── tools/                     → Tool registry + shell tool
+├── memory/                    → Conversation storage (Badger, Postgres)
+├── integration/               → Integration interface + hot-reload
+│   ├── homeassistant/
+│   ├── jellyfin/
+│   └── qbittorrent/
+└── channel/                   → Chat adapters
+    ├── telegram/
+    └── whatsapp/
 ```
 
 ---
 
-## Development
+## Roadmap
 
-```bash
-# Install dev deps
-pip install -r requirements.txt
-
-# Run tests (when present)
-python -m pytest
-
-# Lint
-ruff check steward/ channels/
-```
-
-### Adding an integration
-
-1. Create `steward/integrations/myservice.py`
-2. Inherit from `BaseIntegration`
-3. Implement `load_config()`, `get_tools()`, `health_check()`
-4. Create `config/integrations/myservice.yml.example`
-5. Register in `channels/telegram.py` (or your entry point)
+- [ ] Voice: STT (Whisper) + TTS (Piper, ElevenLabs, OpenAI)
+- [ ] Satellite client: remote voice I/O + system management
+- [ ] Embedding-based long-term memory (ONNX)
+- [ ] IDE agent for code assistance
+- [ ] AI-first NAS and home security
 
 ---
 
 ## License
 
-MIT — do whatever you want, just don't blame us.
+MIT

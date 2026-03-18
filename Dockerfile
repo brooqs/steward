@@ -1,21 +1,24 @@
-FROM python:3.12-slim
+# ── Build ─────────────────────────────────────────────────────────────────────
+FROM golang:1.23-alpine AS builder
 
-# System deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache git
 
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /steward ./cmd/steward
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /steward /usr/local/bin/steward
+
+RUN mkdir -p /app/data /app/config/integrations
 WORKDIR /app
 
-# Install Python deps first (better layer caching)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy source
-COPY . .
-
-# Create data directory for SQLite
-RUN mkdir -p data
-
-# Default entry point: Telegram channel
-CMD ["python", "-m", "channels.telegram"]
+ENTRYPOINT ["steward"]
+CMD ["--config", "/app/config/core.yml", "--channel", "telegram"]

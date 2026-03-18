@@ -1,0 +1,99 @@
+version: 2
+
+project_name: steward
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+
+builds:
+  - id: steward
+    main: ./cmd/steward
+    binary: steward
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+
+  - id: steward-satellite
+    main: ./cmd/satellite
+    binary: steward-satellite
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+
+archives:
+  - id: steward
+    builds:
+      - steward
+      - steward-satellite
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - config/core.yml.example
+      - config/integrations/*.yml.example
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+
+release:
+  github:
+    owner: brooqs
+    name: steward
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+
+nfpms:
+  - id: steward
+    package_name: steward
+    builds:
+      - steward
+      - steward-satellite
+    vendor: brooqs
+    homepage: https://github.com/brooqs/steward
+    maintainer: brooqs
+    description: "AI Personal Assistant — single binary, multi-provider, voice-enabled"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: config/core.yml.example
+        dst: /etc/steward/core.yml.example
+        type: config
