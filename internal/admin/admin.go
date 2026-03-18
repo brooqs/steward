@@ -6,12 +6,14 @@ package admin
 import (
 	"context"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +83,8 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/integrations", s.requireAuth(s.handleIntegrations))
 	mux.HandleFunc("/api/integrations/save", s.requireAuth(s.handleIntegrationSave))
 	mux.HandleFunc("/api/integrations/templates", s.requireAuth(s.handleIntegrationTemplates))
+	mux.HandleFunc("/api/spotify/authorize", s.requireAuth(s.handleSpotifyAuth))
+	mux.HandleFunc("/api/spotify/callback", s.handleSpotifyCallback) // no auth — redirect from Spotify
 	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
 	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
@@ -422,4 +426,158 @@ func (s *Server) handleIntegrationTemplates(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"templates": templates})
+}
+
+// ── Spotify OAuth2 ────────────────────────────────────────────
+
+const spotifyScopes = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
+
+func (s *Server) readSpotifyConfig() (map[string]any, error) {
+	data, err := os.ReadFile(filepath.Join(s.integrationsDir, "spotify.yml"))
+	if err != nil {
+		return nil, fmt.Errorf("spotify.yml not found — create it first via Add Integration")
+	}
+	var cfg map[string]any
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func (s *Server) handleSpotifyAuth(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.readSpotifyConfig()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	clientID, _ := cfg["client_id"].(string)
+	if clientID == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "client_id not set in spotify.yml"})
+		return
+	}
+
+	// Build callback URL from request
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	redirectURI := fmt.Sprintf("%s://%s/api/spotify/callback", scheme, r.Host)
+
+	authURL := fmt.Sprintf(
+		"https://accounts.spotify.com/authorize?client_id=%s&response_type=code&redirect_uri=%s&scope=%s",
+		clientID,
+		url.QueryEscape(redirectURI),
+		url.QueryEscape(spotifyScopes),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"url": authURL, "redirect_uri": redirectURI})
+}
+
+func (s *Server) handleSpotifyCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	errParam := r.URL.Query().Get("error")
+
+	if errParam != "" {
+		s.spotifyResultPage(w, false, "Authorization denied: "+errParam)
+		return
+	}
+	if code == "" {
+		s.spotifyResultPage(w, false, "No authorization code received")
+		return
+	}
+
+	cfg, err := s.readSpotifyConfig()
+	if err != nil {
+		s.spotifyResultPage(w, false, err.Error())
+		return
+	}
+
+	clientID, _ := cfg["client_id"].(string)
+	clientSecret, _ := cfg["client_secret"].(string)
+	if clientID == "" || clientSecret == "" {
+		s.spotifyResultPage(w, false, "client_id or client_secret missing in spotify.yml")
+		return
+	}
+
+	// Build redirect URI
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	redirectURI := fmt.Sprintf("%s://%s/api/spotify/callback", scheme, r.Host)
+
+	// Exchange code for tokens
+	data := url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {code},
+		"redirect_uri": {redirectURI},
+	}
+
+	req, _ := http.NewRequest("POST", "https://accounts.spotify.com/api/token",
+		strings.NewReader(data.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Basic "+
+		base64.StdEncoding.EncodeToString([]byte(clientID+":"+clientSecret)))
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		s.spotifyResultPage(w, false, "Token exchange failed: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		s.spotifyResultPage(w, false, fmt.Sprintf("Token exchange HTTP %d: %s", resp.StatusCode, string(body)))
+		return
+	}
+
+	var tokenResp struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	json.Unmarshal(body, &tokenResp)
+
+	if tokenResp.RefreshToken == "" {
+		s.spotifyResultPage(w, false, "No refresh_token received from Spotify")
+		return
+	}
+
+	// Update spotify.yml with the refresh token
+	cfg["refresh_token"] = tokenResp.RefreshToken
+	cfg["enabled"] = true
+
+	yamlData, _ := yaml.Marshal(cfg)
+	spotifyPath := filepath.Join(s.integrationsDir, "spotify.yml")
+	if err := os.WriteFile(spotifyPath, yamlData, 0o644); err != nil {
+		s.spotifyResultPage(w, false, "Failed to save config: "+err.Error())
+		return
+	}
+
+	slog.Info("spotify oauth2 completed", "refresh_token_length", len(tokenResp.RefreshToken))
+	s.spotifyResultPage(w, true, "Spotify connected! Integration will auto-load.")
+}
+
+func (s *Server) spotifyResultPage(w http.ResponseWriter, success bool, message string) {
+	emoji := "❌"
+	color := "#ff4444"
+	if success {
+		emoji = "✅"
+		color = "#44ff44"
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html><head><title>Spotify Auth</title>
+<style>body{background:#0a0a0a;color:#fff;font-family:-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
+.box{text-align:center;padding:40px;border-radius:16px;background:#1a1a1a;border:1px solid #333}
+.emoji{font-size:48px;margin-bottom:16px}.msg{color:%s;font-size:18px;margin-bottom:16px}
+a{color:#1db954;text-decoration:none}</style></head>
+<body><div class="box"><div class="emoji">%s</div><div class="msg">%s</div>
+<a href="/">← Back to Admin Panel</a></div></body></html>`, color, emoji, message)
 }
