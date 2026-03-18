@@ -240,6 +240,9 @@
       <div class="nav-item" data-page="integrations">
         <span class="icon">🔌</span><span>Integrations</span>
       </div>
+      <div class="nav-item" data-page="spotify">
+        <span class="icon">🎵</span><span>Spotify</span>
+      </div>
     </aside>
 
     <main class="main">
@@ -324,8 +327,7 @@
       <div class="page" id="page-integrations">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
           <h2 class="page-title" style="margin:0">Integrations</h2>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" style="background:#1db954;color:#fff;border:none;font-size:12px;display:none" id="spotify-connect-btn" onclick="connectSpotify()">🔗 Connect Spotify</button>
+          <div style="position:relative">
             <button class="btn btn-primary btn-sm" onclick="showTemplates()" id="add-int-btn">+ Add Integration</button>
             <div id="template-dropdown" style="display:none; position:absolute; right:0; top:38px; background:var(--surface); border:1px solid var(--border); border-radius:8px; min-width:200px; box-shadow:0 4px 12px rgba(0,0,0,.3); z-index:10;">
               <div id="template-list" style="padding:4px"></div>
@@ -345,29 +347,39 @@
             <textarea class="config-editor" id="int-config-editor" spellcheck="false"></textarea>
           </div>
         </div>
-        <!-- Spotify Connect Panel -->
-        <div id="spotify-connect-panel" style="display:none; margin-top:20px;">
-          <div class="editor-container">
-            <div class="editor-toolbar">
-              <span style="font-weight:600">🔗 Connect Spotify</span>
-              <button class="btn btn-sm" onclick="document.getElementById('spotify-connect-panel').style.display='none'">Cancel</button>
+
+      </div>
+
+      <!-- Spotify Setup -->
+      <div class="page" id="page-spotify">
+        <h2 class="page-title">🎵 Spotify Setup</h2>
+        <div id="spotify-status-bar" style="padding:12px 16px;border-radius:8px;margin-bottom:20px;display:none"></div>
+        <div class="editor-container">
+          <div style="padding:20px">
+            <div style="margin-bottom:20px">
+              <div style="font-size:13px;color:var(--muted);margin-bottom:6px">1. Create an app at <a href="https://developer.spotify.com/dashboard" target="_blank" style="color:#1db954">developer.spotify.com/dashboard</a></div>
+              <div style="font-size:13px;color:var(--muted);margin-bottom:12px">2. Add redirect URI: <code style="background:#333;padding:2px 6px;border-radius:4px">http://127.0.0.1:8888/callback</code></div>
             </div>
-            <div style="padding:16px;font-size:14px;line-height:1.8">
-              <div style="margin-bottom:12px">
-                <strong>Step 1:</strong> Make sure you added <code style="background:#333;padding:2px 6px;border-radius:4px">http://127.0.0.1:8888/callback</code> as a Redirect URI in your <a href="https://developer.spotify.com/dashboard" target="_blank" style="color:#1db954">Spotify Developer Dashboard</a>.
-              </div>
-              <div style="margin-bottom:12px">
-                <strong>Step 2:</strong> <button class="btn btn-sm" style="background:#1db954;color:#fff;border:none" onclick="openSpotifyAuth()">Open Spotify Login</button>
-              </div>
-              <div style="margin-bottom:12px">
-                <strong>Step 3:</strong> After authorizing, you'll be redirected to a page that <em>won't load</em> (localhost). That's normal! Copy the <strong>full URL</strong> from the address bar.
-              </div>
-              <div style="margin-bottom:12px">
-                <strong>Step 4:</strong> Paste the URL here:
-                <div style="display:flex;gap:8px;margin-top:8px">
-                  <input type="text" id="spotify-callback-input" placeholder="http://127.0.0.1:8888/callback?code=..." style="flex:1;background:#1a1a2e;border:1px solid #333;border-radius:6px;padding:8px 12px;color:#fff;font-size:13px">
-                  <button class="btn btn-primary btn-sm" onclick="submitSpotifyCallback()">Submit</button>
-                </div>
+
+            <div style="margin-bottom:16px">
+              <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px">Client ID</label>
+              <input type="text" id="sp-client-id" placeholder="your-client-id" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:#fff;font-size:14px;box-sizing:border-box">
+            </div>
+
+            <div style="margin-bottom:20px">
+              <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px">Client Secret</label>
+              <input type="password" id="sp-client-secret" placeholder="your-client-secret" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:#fff;font-size:14px;box-sizing:border-box">
+            </div>
+
+            <div style="margin-bottom:20px">
+              <button class="btn btn-sm" style="background:#1db954;color:#fff;border:none;padding:10px 20px;font-size:14px" onclick="spotifySaveAndAuth()">3. Save & Open Spotify Login →</button>
+            </div>
+
+            <div style="margin-bottom:16px">
+              <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px">4. Paste the callback URL here (the page that won't load)</label>
+              <div style="display:flex;gap:8px">
+                <input type="text" id="sp-callback-url" placeholder="http://127.0.0.1:8888/callback?code=..." style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:#fff;font-size:14px">
+                <button class="btn btn-primary btn-sm" style="padding:10px 20px" onclick="spotifyExchange()">Connect</button>
               </div>
             </div>
           </div>
@@ -388,6 +400,7 @@
         document.getElementById('page-' + item.dataset.page).classList.add('active');
         if (item.dataset.page === 'settings') loadConfig();
         if (item.dataset.page === 'whatsapp') loadWhatsApp();
+        if (item.dataset.page === 'spotify') loadSpotifyPage();
       });
     });
 
@@ -562,16 +575,6 @@
         const res = await fetch('/api/integrations', { credentials: 'same-origin' });
         const data = await res.json();
         const list = document.getElementById('int-list');
-        const spotifyBtn = document.getElementById('spotify-connect-btn');
-
-        // Check if spotify needs OAuth connection
-        var needsConnect = false;
-        if (data.integrations) {
-          data.integrations.forEach(i => {
-            if (i.name === 'spotify' && i.needs_connect) { needsConnect = true; }
-          });
-        }
-        spotifyBtn.style.display = needsConnect ? 'inline-block' : 'none';
 
         if (!data.integrations || data.integrations.length === 0) {
           list.innerHTML = '<div class="service-row"><div><div class="service-name">No integrations found</div><div class="service-detail">Add .yml files to the integrations directory</div></div></div>';
@@ -580,50 +583,86 @@
 
         list.innerHTML = data.integrations.map(i => {
           var badge = i.enabled ? '<span class="badge badge-green">Enabled</span>' : '<span class="badge badge-yellow">Disabled</span>';
-          var connectBtn = '';
-          if (i.needs_connect) {
-            connectBtn = '<button class="btn btn-sm" style="background:#1db954;color:#fff;margin-right:8px;border:none;font-size:12px" onclick="event.stopPropagation();connectSpotify()">🔗 Connect</button>';
-          }
           return '<div class="service-row" style="cursor:pointer" onclick="editIntegration(\'' + i.name + '\')">' +
             '<div><div class="service-name">' + i.name + '</div><div class="service-detail">Click to edit configuration</div></div>' +
-            '<div style="display:flex;align-items:center;gap:8px">' + connectBtn + badge + '</div></div>';
+            '<div>' + badge + '</div></div>';
         }).join('');
       } catch (e) {
         console.error('Integration load error:', e);
       }
     }
 
-    async function connectSpotify() {
-      document.getElementById('spotify-connect-panel').style.display = 'block';
-      document.getElementById('spotify-callback-input').value = '';
-    }
-
-    async function openSpotifyAuth() {
+    // Spotify page
+    async function loadSpotifyPage() {
+      const bar = document.getElementById('spotify-status-bar');
       try {
-        const res = await fetch('/api/spotify/authorize', { credentials: 'same-origin' });
+        const res = await fetch('/api/integrations?name=spotify', { credentials: 'same-origin' });
         const data = await res.json();
-        if (data.error) { showToast(data.error, 'error'); return; }
-        if (data.url) window.open(data.url, '_blank');
+        if (data.raw) {
+          // Parse YAML manually to extract values
+          const lines = data.raw.split('\n');
+          lines.forEach(l => {
+            const m = l.match(/^(\w+):\s*"?([^"]*)"?$/);
+            if (!m) return;
+            if (m[1] === 'client_id' && m[2]) document.getElementById('sp-client-id').value = m[2];
+            if (m[1] === 'client_secret' && m[2]) document.getElementById('sp-client-secret').value = m[2];
+            if (m[1] === 'refresh_token' && m[2]) {
+              bar.style.display = 'block';
+              bar.style.background = 'rgba(29,185,52,0.15)';
+              bar.style.border = '1px solid #1db954';
+              bar.innerHTML = '✅ <strong>Spotify connected!</strong> refresh_token is set.';
+            }
+          });
+        }
       } catch (e) {
-        showToast('Failed to get auth URL', 'error');
+        // spotify.yml doesn't exist yet, that's fine
       }
     }
 
-    async function submitSpotifyCallback() {
-      const callbackUrl = document.getElementById('spotify-callback-input').value.trim();
-      if (!callbackUrl) { showToast('Please paste the callback URL', 'error'); return; }
+    async function spotifySaveAndAuth() {
+      const clientId = document.getElementById('sp-client-id').value.trim();
+      const clientSecret = document.getElementById('sp-client-secret').value.trim();
+      if (!clientId || !clientSecret) { showToast('Client ID and Secret required', 'error'); return; }
+
+      // Save spotify.yml first
+      const yml = 'enabled: true\nclient_id: "' + clientId + '"\nclient_secret: "' + clientSecret + '"\nrefresh_token: ""';
+      try {
+        const saveRes = await fetch('/api/integrations/save', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ name: 'spotify', content: yml })
+        });
+        if (!saveRes.ok) { showToast('Failed to save config', 'error'); return; }
+
+        // Now get auth URL
+        const authRes = await fetch('/api/spotify/authorize', { credentials: 'same-origin' });
+        const authData = await authRes.json();
+        if (authData.error) { showToast(authData.error, 'error'); return; }
+        if (authData.url) {
+          showToast('Opening Spotify login...', 'success');
+          window.open(authData.url, '_blank');
+        }
+      } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+      }
+    }
+
+    async function spotifyExchange() {
+      const callbackUrl = document.getElementById('sp-callback-url').value.trim();
+      if (!callbackUrl) { showToast('Paste the callback URL first', 'error'); return; }
       try {
         const res = await fetch('/api/spotify/exchange', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
           body: JSON.stringify({ callback_url: callbackUrl })
         });
         const data = await res.json();
         if (res.ok && data.message) {
           showToast(data.message, 'success');
-          document.getElementById('spotify-connect-panel').style.display = 'none';
-          setTimeout(loadIntegrations, 500);
+          const bar = document.getElementById('spotify-status-bar');
+          bar.style.display = 'block';
+          bar.style.background = 'rgba(29,185,52,0.15)';
+          bar.style.border = '1px solid #1db954';
+          bar.innerHTML = '✅ <strong>Spotify connected!</strong> Integration will hot-reload.';
+          document.getElementById('sp-callback-url').value = '';
         } else {
           showToast(data.error || 'Exchange failed', 'error');
         }
