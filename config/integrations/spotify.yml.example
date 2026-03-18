@@ -1,0 +1,18 @@
+# Spotify Integration
+# Get your credentials from https://developer.spotify.com/dashboard
+#
+# Setup:
+# 1. Create an app at https://developer.spotify.com/dashboard
+# 2. Set redirect URI to http://localhost:8888/callback
+# 3. Get your refresh_token using the OAuth2 flow:
+#    https://developer.spotify.com/documentation/web-api/tutorials/code-flow
+#
+# Required scopes:
+#   user-read-playback-state
+#   user-modify-playback-state
+#   user-read-currently-playing
+
+enabled: true
+client_id: ""
+client_secret: ""
+refresh_token: ""

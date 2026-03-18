@@ -34,6 +34,7 @@ import (
 	_ "github.com/brooqs/steward/internal/integration/homeassistant"
 	_ "github.com/brooqs/steward/internal/integration/jellyfin"
 	_ "github.com/brooqs/steward/internal/integration/qbittorrent"
+	_ "github.com/brooqs/steward/internal/integration/spotify"
 )
 
 var (
