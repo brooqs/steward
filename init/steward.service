@@ -18,7 +18,7 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/var/lib/steward
+ReadWritePaths=/var/lib/steward /etc/steward
 
 # Environment
 Environment=STEWARD_LOG_LEVEL=info
