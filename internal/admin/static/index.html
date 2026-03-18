@@ -537,16 +537,14 @@
         const list = document.getElementById('int-list');
         const spotifyBtn = document.getElementById('spotify-connect-btn');
 
-        // Check if spotify exists and needs connecting
-        var hasSpotify = false;
-        var spotifyEnabled = false;
+        // Check if spotify needs OAuth connection
+        var needsConnect = false;
         if (data.integrations) {
           data.integrations.forEach(i => {
-            if (i.name === 'spotify') { hasSpotify = true; spotifyEnabled = i.enabled; }
+            if (i.name === 'spotify' && i.needs_connect) { needsConnect = true; }
           });
         }
-        // Show connect button if spotify exists but not enabled
-        spotifyBtn.style.display = (hasSpotify && !spotifyEnabled) ? 'inline-block' : 'none';
+        spotifyBtn.style.display = needsConnect ? 'inline-block' : 'none';
 
         if (!data.integrations || data.integrations.length === 0) {
           list.innerHTML = '<div class="service-row"><div><div class="service-name">No integrations found</div><div class="service-detail">Add .yml files to the integrations directory</div></div></div>';
@@ -556,7 +554,7 @@
         list.innerHTML = data.integrations.map(i => {
           var badge = i.enabled ? '<span class="badge badge-green">Enabled</span>' : '<span class="badge badge-yellow">Disabled</span>';
           var connectBtn = '';
-          if (i.name === 'spotify' && !i.enabled) {
+          if (i.needs_connect) {
             connectBtn = '<button class="btn btn-sm" style="background:#1db954;color:#fff;margin-right:8px;border:none;font-size:12px" onclick="event.stopPropagation();connectSpotify()">🔗 Connect</button>';
           }
           return '<div class="service-row" style="cursor:pointer" onclick="editIntegration(\'' + i.name + '\')">' +

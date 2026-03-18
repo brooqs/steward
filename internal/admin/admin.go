@@ -306,8 +306,9 @@ func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type integrationInfo struct {
-		Name    string `json:"name"`
-		Enabled bool   `json:"enabled"`
+		Name         string `json:"name"`
+		Enabled      bool   `json:"enabled"`
+		NeedsConnect bool   `json:"needs_connect,omitempty"`
 	}
 
 	var integrations []integrationInfo
@@ -329,10 +330,17 @@ func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 			enabled, _ = v.(bool)
 		}
 
-		integrations = append(integrations, integrationInfo{
-			Name:    intName,
-			Enabled: enabled,
-		})
+		info := integrationInfo{Name: intName, Enabled: enabled}
+
+		// Spotify-specific: check if refresh_token is empty
+		if intName == "spotify" {
+			rt, _ := cfg["refresh_token"].(string)
+			if rt == "" {
+				info.NeedsConnect = true
+			}
+		}
+
+		integrations = append(integrations, info)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
