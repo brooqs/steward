@@ -1,133 +1,135 @@
-# Steward — AI Personal Assistant
+# 🤖 Steward — AI Personal Assistant
 
-> A self-hosted, modular AI assistant built in Go. Runs as a single binary.
-> Supports multiple LLM providers, smart home integrations, and chat channels.
+> Self-hosted AI assistant that runs as a single binary. Multi-provider, voice-enabled, with remote satellite clients.
 
----
-
-## Features
-
-- **Multi-Provider** — Claude, OpenAI, Groq, Gemini, Ollama, OpenRouter
-- **Smart Memory** — BadgerDB-backed conversation history (PostgreSQL optional)
-- **Tool Use** — Native LLM function calling for real actions
-- **Shell Access** — Execute system commands (security-hardened, disabled by default)
-- **Pluggable Integrations** — Home Assistant, Jellyfin, qBittorrent
-- **Hot-Reload** — Add/remove integrations without restarting
-- **Chat Channels** — Telegram, WhatsApp
-- **Security-First** — User whitelisting, command blocklist, webhook secrets
-- **Single Binary** — No runtime dependencies, cross-platform
+[![CI](https://github.com/brooqs/steward/actions/workflows/ci.yml/badge.svg)](https://github.com/brooqs/steward/actions/workflows/ci.yml)
+[![Release](https://github.com/brooqs/steward/releases/latest/badge.svg)](https://github.com/brooqs/steward/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## Quick Start
+## ✨ Features
 
-### Build & Run (Native)
+- 🧠 **6 LLM Providers** — Claude, OpenAI, Groq, Gemini, Ollama, OpenRouter
+- 🎙️ **Voice System** — STT (Groq Whisper, OpenAI, whisper.cpp) + TTS (OpenAI, ElevenLabs, Piper)
+- 🛰️ **Satellite System** — JARVIS-style remote clients with audio, shell exec, system management
+- 🔌 **Hot-Reload Integrations** — Home Assistant, Jellyfin, qBittorrent (add your own!)
+- 💾 **Flexible Memory** — BadgerDB (default) or PostgreSQL with pgvector
+- 🔍 **Semantic Search** — Embedding-based long-term memory (OpenAI, Ollama)
+- 🌐 **Web Admin Panel** — Dark theme dashboard with config editor
+- 📱 **Channels** — Telegram, WhatsApp
+- 🔐 **Security-First** — Shell blocklist, token auth, basic auth, TLS support
+- 📦 **Single Binary** — No runtime dependencies, cross-platform (Linux, macOS, Windows)
+
+---
+
+## 🚀 Quick Start
 
 ```bash
-# Build
-go build -o steward ./cmd/steward
+# One-liner install
+curl -sSL https://raw.githubusercontent.com/brooqs/steward/main/install.sh | bash
 
 # Configure
-cp config/core.yml.example config/core.yml
-# Edit config/core.yml — add API key, Telegram token, etc.
+sudo cp /etc/steward/core.yml.example /etc/steward/core.yml
+sudo nano /etc/steward/core.yml   # set provider + api_key
 
-# Run
+# Start
+sudo systemctl enable --now steward
+
+# Logs
+journalctl -u steward -f
+```
+
+### From Source
+
+```bash
+git clone https://github.com/brooqs/steward.git
+cd steward
+go build -o steward ./cmd/steward
+go build -o steward-satellite ./cmd/satellite
 ./steward --config config/core.yml --channel telegram
 ```
 
-### Docker (Optional)
+### Docker
 
 ```bash
 cp config/core.yml.example config/core.yml
-# Edit config/core.yml
-
 docker compose up -d
-docker compose logs -f steward
 ```
 
 ---
 
-## Configuration
+## 📚 Documentation
 
-### `config/core.yml`
+Full documentation available in the **[Wiki](https://github.com/brooqs/steward/wiki)**.
 
-| Key | Description | Default |
-|-----|-------------|---------|
-| `provider` | LLM provider | `claude` |
-| `api_key` | Provider API key | env `STEWARD_API_KEY` |
-| `model` | Model ID | `claude-sonnet-4-5` |
-| `base_url` | Custom endpoint (Ollama, etc.) | — |
-| `memory.backend` | Storage backend | `badger` |
-| `shell.enabled` | Enable shell tool | `false` |
-| `telegram.token` | Telegram bot token | env `TELEGRAM_TOKEN` |
-| `telegram.allowed_ids` | Authorized user/chat IDs | `[]` (all) |
-
-### Integrations
-
-Enable an integration by copying its example config:
-
-```bash
-cp config/integrations/homeassistant.yml.example config/integrations/homeassistant.yml
-# Edit and fill in credentials
-```
-
-**Hot-reload**: Add or remove YAML files while Steward is running — integrations load/unload automatically.
+| Page | Description |
+|------|-------------|
+| [Installation](https://github.com/brooqs/steward/wiki/Installation) | Binary, deb/rpm, Docker, install script |
+| [Configuration](https://github.com/brooqs/steward/wiki/Configuration) | core.yml reference, environment variables |
+| [Providers](https://github.com/brooqs/steward/wiki/Providers) | LLM provider setup guide |
+| [Voice](https://github.com/brooqs/steward/wiki/Voice) | STT/TTS setup |
+| [Satellite](https://github.com/brooqs/steward/wiki/Satellite) | JARVIS-style remote client |
+| [Integrations](https://github.com/brooqs/steward/wiki/Integrations) | Built-in + custom development |
+| [Admin Panel](https://github.com/brooqs/steward/wiki/Admin-Panel) | Web UI for config & monitoring |
+| [Security](https://github.com/brooqs/steward/wiki/Security) | Hardening guide |
+| [Architecture](https://github.com/brooqs/steward/wiki/Architecture) | System design & module graph |
 
 ---
 
-## Supported Providers
-
-| Provider | Tool Use | Config |
-|----------|----------|--------|
-| **Claude** (Anthropic) | ✅ | `provider: claude` |
-| **OpenAI** | ✅ | `provider: openai` |
-| **Groq** | ✅ | `provider: groq` |
-| **Gemini** (Google) | ✅ | `provider: gemini` |
-| **Ollama** (Local) | ✅ | `provider: ollama`, `base_url: http://localhost:11434/v1` |
-| **OpenRouter** | ✅ | `provider: openrouter` |
-
----
-
-## Security
-
-- **Telegram whitelisting**: Set `telegram.allowed_ids` to restrict access
-- **Shell tool**: Disabled by default, has command blocklist and timeout
-- **WhatsApp webhook secret**: Set `whatsapp.webhook_secret` for validation
-- **Integration isolation**: Each integration has its own config; broken configs don't affect others
-
----
-
-## Architecture
+## 🏗️ Architecture
 
 ```
-cmd/steward/main.go           → Entry point, CLI, wiring
-internal/
-├── config/                    → YAML + env config loader
-├── provider/                  → LLM adapters (Claude, OpenAI, Gemini)
-├── core/                      → Agent loop (provider-agnostic)
-├── tools/                     → Tool registry + shell tool
-├── memory/                    → Conversation storage (Badger, Postgres)
-├── integration/               → Integration interface + hot-reload
-│   ├── homeassistant/
-│   ├── jellyfin/
-│   └── qbittorrent/
-└── channel/                   → Chat adapters
-    ├── telegram/
-    └── whatsapp/
+steward/
+├── cmd/
+│   ├── steward/         # Main server binary
+│   └── satellite/       # Remote client binary
+├── internal/
+│   ├── admin/           # Web admin panel (embedded)
+│   ├── channel/         # Telegram, WhatsApp
+│   ├── config/          # YAML + env config loader
+│   ├── core/            # Provider-agnostic agent loop
+│   ├── embedding/       # Vector embeddings (OpenAI, Ollama)
+│   ├── integration/     # Hot-reload integration system
+│   ├── memory/          # BadgerDB, PostgreSQL, semantic search
+│   ├── provider/        # LLM adapters (6 providers)
+│   ├── satellite/       # WebSocket server + management tools
+│   ├── tools/           # Tool registry + shell tool
+│   └── voice/           # STT + TTS engine
+├── config/              # Example configurations
+├── docs/                # Wiki documentation
+└── init/                # systemd service
 ```
 
 ---
 
-## Roadmap
+## 🔐 Security
 
-- [ ] Voice: STT (Whisper) + TTS (Piper, ElevenLabs, OpenAI)
-- [ ] Satellite client: remote voice I/O + system management
-- [ ] Embedding-based long-term memory (ONNX)
-- [ ] IDE agent for code assistance
-- [ ] AI-first NAS and home security
+| Feature | Default | Notes |
+|---------|---------|-------|
+| Shell tool | **Disabled** | Command blocklist + timeout |
+| Telegram | **No whitelist** | Configure `allowed_ids` |
+| Satellite | **Disabled** | Token auth + TLS |
+| Admin panel | **Disabled** | Basic auth required |
 
 ---
 
-## License
+## 🤝 Contributing
 
-MIT
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+---
+
+## 📝 Credits
+
+Built with ❤️ by **[brooqs](https://github.com/brooqs)**
+
+Architecture design, codebase implementation, and documentation proudly crafted with **[Claude Opus 4](https://www.anthropic.com)** — Anthropic's most capable AI model.
+
+> *"From zero to a production-ready AI assistant in a single session."*
+
+---
+
+## 📄 License
+
+[MIT](LICENSE)
