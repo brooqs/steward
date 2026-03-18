@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 
 	"github.com/brooqs/steward/internal/memory"
 	"github.com/brooqs/steward/internal/provider"
@@ -45,6 +47,54 @@ func New(cfg Config) *Steward {
 		maxTokens: cfg.MaxTokens,
 		sysPrompt: cfg.SystemPrompt,
 	}
+}
+
+// buildSystemPrompt constructs the full system prompt with dynamic capabilities.
+func (s *Steward) buildSystemPrompt() string {
+	var sb strings.Builder
+	sb.WriteString(s.sysPrompt)
+
+	// Get all tool schemas for names + descriptions
+	schemas := s.registry.GetSchemas()
+	if len(schemas) == 0 {
+		return sb.String()
+	}
+
+	// Group tools by prefix (integration name)
+	groups := make(map[string][]string)
+	for _, schema := range schemas {
+		parts := strings.SplitN(schema.Name, "_", 2)
+		group := "general"
+		name := schema.Name
+		if len(parts) == 2 {
+			group = parts[0]
+			name = parts[1]
+		}
+		desc := name
+		if schema.Description != "" {
+			desc = name + " — " + schema.Description
+		}
+		groups[group] = append(groups[group], desc)
+	}
+
+	sb.WriteString("\n\n## Your Capabilities\n")
+	sb.WriteString(fmt.Sprintf("You have %d tools available:\n", len(schemas)))
+
+	// Sort group names for consistent output
+	groupNames := make([]string, 0, len(groups))
+	for g := range groups {
+		groupNames = append(groupNames, g)
+	}
+	sort.Strings(groupNames)
+
+	for _, g := range groupNames {
+		sb.WriteString(fmt.Sprintf("\n### %s\n", strings.Title(g)))
+		for _, t := range groups[g] {
+			sb.WriteString(fmt.Sprintf("- %s\n", t))
+		}
+	}
+
+	return sb.String()
 }
 
 // Chat processes a single user message and returns the assistant's reply.
@@ -91,7 +141,7 @@ func (s *Steward) runTurn(ctx context.Context, messages []provider.Message) (str
 	for i := 0; i < maxToolIterations; i++ {
 		req := &provider.Request{
 			Model:        s.model,
-			SystemPrompt: s.sysPrompt,
+			SystemPrompt: s.buildSystemPrompt(),
 			Messages:     currentMessages,
 			Tools:        toolSchemas,
 			MaxTokens:    s.maxTokens,
