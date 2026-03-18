@@ -8,10 +8,12 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +29,7 @@ type Config struct {
 	ListenAddr string `yaml:"listen_addr"` // e.g., "0.0.0.0:8080"
 	Username   string `yaml:"username"`    // basic auth
 	Password   string `yaml:"password"`    // basic auth
+	BridgeURL  string `yaml:"bridge_url"`  // WhatsApp bridge URL (e.g., http://127.0.0.1:3000)
 }
 
 // StatusProvider gives the admin panel access to runtime state.
@@ -73,6 +76,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/config", s.requireAuth(s.handleConfig))
 	mux.HandleFunc("/api/config/save", s.requireAuth(s.handleConfigSave))
 	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
+	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
 	// Static files (embedded)
 	staticFS, err := fs.Sub(staticFiles, "static")
@@ -215,9 +219,49 @@ func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
-	// Try journalctl first, then fallback
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Use 'journalctl -u steward -n 100' on the server to view logs",
 	})
+}
+
+// handleBridgeProxy forwards requests to the WhatsApp bridge.
+func (s *Server) handleBridgeProxy(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.BridgeURL == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": "bridge_url not configured in admin config",
+		})
+		return
+	}
+
+	// Strip /api/whatsapp/ prefix → forward to bridge
+	bridgePath := strings.TrimPrefix(r.URL.Path, "/api/whatsapp")
+	if bridgePath == "" {
+		bridgePath = "/"
+	}
+	targetURL := strings.TrimRight(s.cfg.BridgeURL, "/") + bridgePath
+
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, r.Body)
+	if err != nil {
+		http.Error(w, "proxy error", http.StatusInternalServerError)
+		return
+	}
+	proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"error":  "bridge unreachable",
+			"detail": err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }

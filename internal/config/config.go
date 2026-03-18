@@ -102,6 +102,7 @@ type AdminConfig struct {
 	ListenAddr string `yaml:"listen_addr"` // default: 0.0.0.0:8080
 	Username   string `yaml:"username"`    // basic auth username
 	Password   string `yaml:"password"`    // basic auth password
+	BridgeURL  string `yaml:"bridge_url"`  // WhatsApp bridge URL
 }
 
 // DefaultConfig returns a Config with safe defaults.

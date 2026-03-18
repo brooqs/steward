@@ -184,6 +184,32 @@
     .toast.error { background: rgba(225,112,85,0.9); color: white; }
     @keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
+    /* QR code */
+    .qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      padding: 40px;
+    }
+    .qr-box {
+      background: white;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 8px 30px rgba(108, 92, 231, 0.2);
+    }
+    .qr-status {
+      text-align: center;
+      font-size: 14px;
+      color: var(--text-dim);
+    }
+    .qr-status .status-icon { font-size: 48px; margin-bottom: 12px; }
+    .btn-danger {
+      background: var(--red);
+      color: white;
+    }
+    .btn-danger:hover { background: #d63031; }
+
     /* Responsive */
     @media (max-width: 768px) {
       .sidebar { width: 60px; }
@@ -193,6 +219,7 @@
       .grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 </head>
 <body>
   <div class="app">
@@ -206,6 +233,9 @@
       </div>
       <div class="nav-item" data-page="settings">
         <span class="icon">⚙️</span><span>Settings</span>
+      </div>
+      <div class="nav-item" data-page="whatsapp">
+        <span class="icon">📱</span><span>WhatsApp</span>
       </div>
       <div class="nav-item" data-page="integrations">
         <span class="icon">🔌</span><span>Integrations</span>
@@ -259,6 +289,37 @@
         <p style="margin-top:12px;font-size:12px;color:var(--text-dim);">Changes require a service restart: <code style="background:var(--surface2);padding:2px 6px;border-radius:4px;">systemctl restart steward</code></p>
       </div>
 
+      <!-- WhatsApp -->
+      <div class="page" id="page-whatsapp">
+        <h2 class="page-title">WhatsApp Connection</h2>
+        <div class="grid" style="margin-bottom:24px">
+          <div class="card">
+            <div class="card-label">Status</div>
+            <div class="card-value" id="wa-status"><span class="badge badge-yellow">Checking...</span></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Messages</div>
+            <div class="card-value" id="wa-messages">0</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Connected Since</div>
+            <div class="card-value" id="wa-connected" style="font-size:14px">—</div>
+          </div>
+        </div>
+        <div class="editor-container">
+          <div class="editor-toolbar">
+            <span id="wa-instruction">Checking bridge status...</span>
+            <button class="btn btn-danger" id="wa-logout-btn" style="display:none" onclick="waLogout()">🔌 Disconnect</button>
+          </div>
+          <div class="qr-container" id="wa-qr-area">
+            <div class="qr-status" id="wa-qr-status">
+              <div class="status-icon">⏳</div>
+              <div>Connecting to WhatsApp bridge...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Integrations -->
       <div class="page" id="page-integrations">
         <h2 class="page-title">Integrations</h2>
@@ -285,6 +346,7 @@
         item.classList.add('active');
         document.getElementById('page-' + item.dataset.page).classList.add('active');
         if (item.dataset.page === 'settings') loadConfig();
+        if (item.dataset.page === 'whatsapp') loadWhatsApp();
       });
     });
 
@@ -370,6 +432,73 @@
       toast.style.display = 'block';
       setTimeout(() => { toast.style.display = 'none'; }, 4000);
     }
+
+    // WhatsApp
+    let waQrRendered = false;
+    async function loadWhatsApp() {
+      try {
+        const healthRes = await fetch('/api/whatsapp/health');
+        const health = await healthRes.json();
+
+        if (health.error) {
+          document.getElementById('wa-status').innerHTML = '<span class="badge badge-red">Bridge Error</span>';
+          document.getElementById('wa-instruction').textContent = 'Bridge unreachable — check bridge_url config';
+          document.getElementById('wa-qr-status').innerHTML = '<div class="status-icon">❌</div><div>' + (health.detail || health.error) + '</div>';
+          return;
+        }
+
+        document.getElementById('wa-messages').textContent = health.messageCount || 0;
+        document.getElementById('wa-connected').textContent = health.connectedAt ? new Date(health.connectedAt).toLocaleString() : '—';
+
+        if (health.status === 'ready') {
+          document.getElementById('wa-status').innerHTML = '<span class="badge badge-green">Connected</span>';
+          document.getElementById('wa-instruction').textContent = 'WhatsApp is connected and receiving messages';
+          document.getElementById('wa-logout-btn').style.display = 'block';
+          document.getElementById('wa-qr-area').innerHTML = '<div class="qr-status"><div class="status-icon">✅</div><div>WhatsApp is connected!</div></div>';
+          waQrRendered = false;
+        } else if (health.status === 'qr' && health.hasQR) {
+          document.getElementById('wa-status').innerHTML = '<span class="badge badge-yellow">Waiting for scan</span>';
+          document.getElementById('wa-instruction').textContent = 'Scan the QR code with WhatsApp → Linked Devices → Link a Device';
+          document.getElementById('wa-logout-btn').style.display = 'none';
+
+          const qrRes = await fetch('/api/whatsapp/qr');
+          const qrData = await qrRes.json();
+          if (qrData.available && qrData.data) {
+            document.getElementById('wa-qr-area').innerHTML = '<div class="qr-box"><canvas id="wa-qr-canvas"></canvas></div>';
+            QRCode.toCanvas(document.getElementById('wa-qr-canvas'), qrData.data, { width: 280, margin: 2 });
+            waQrRendered = true;
+          }
+        } else {
+          document.getElementById('wa-status').innerHTML = '<span class="badge badge-yellow">' + health.status + '</span>';
+          document.getElementById('wa-instruction').textContent = 'Initializing WhatsApp connection...';
+          document.getElementById('wa-qr-area').innerHTML = '<div class="qr-status"><div class="status-icon">⏳</div><div>Starting WhatsApp client...</div></div>';
+        }
+      } catch (e) {
+        document.getElementById('wa-status').innerHTML = '<span class="badge badge-red">Offline</span>';
+        document.getElementById('wa-instruction').textContent = 'Cannot connect to bridge';
+      }
+    }
+
+    async function waLogout() {
+      if (!confirm('Disconnect WhatsApp? You will need to scan QR again.')) return;
+      try {
+        await fetch('/api/whatsapp/logout', { method: 'POST' });
+        showToast('WhatsApp disconnected', 'success');
+        setTimeout(loadWhatsApp, 2000);
+      } catch (e) {
+        showToast('Disconnect failed', 'error');
+      }
+    }
+
+    let waPoller = null;
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', () => {
+        if (waPoller) { clearInterval(waPoller); waPoller = null; }
+        if (item.dataset.page === 'whatsapp') {
+          waPoller = setInterval(loadWhatsApp, 3000);
+        }
+      });
+    });
 
     // Init
     loadStatus();

@@ -197,6 +197,7 @@ func main() {
 			ListenAddr: cfg.Admin.ListenAddr,
 			Username:   cfg.Admin.Username,
 			Password:   cfg.Admin.Password,
+			BridgeURL:  cfg.Admin.BridgeURL,
 		}
 		adminServer := admin.NewServer(adminCfg, *configPath, adminStatus)
 		go func() {
