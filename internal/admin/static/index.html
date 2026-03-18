@@ -324,7 +324,8 @@
       <div class="page" id="page-integrations">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
           <h2 class="page-title" style="margin:0">Integrations</h2>
-          <div style="position:relative">
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" style="background:#1db954;color:#fff;border:none;font-size:12px;display:none" id="spotify-connect-btn" onclick="connectSpotify()">🔗 Connect Spotify</button>
             <button class="btn btn-primary btn-sm" onclick="showTemplates()" id="add-int-btn">+ Add Integration</button>
             <div id="template-dropdown" style="display:none; position:absolute; right:0; top:38px; background:var(--surface); border:1px solid var(--border); border-radius:8px; min-width:200px; box-shadow:0 4px 12px rgba(0,0,0,.3); z-index:10;">
               <div id="template-list" style="padding:4px"></div>
@@ -381,7 +382,7 @@
         services.push({ name: 'Memory', detail: data.memory_backend, status: 'green' });
         services.push({ name: 'Voice STT', detail: data.voice_stt || 'disabled', status: data.voice_stt ? 'green' : 'yellow' });
         services.push({ name: 'Voice TTS', detail: data.voice_tts || 'disabled', status: data.voice_tts ? 'green' : 'yellow' });
-        services.push({ name: 'Satellites', detail: `${data.satellite_count || 0} connected`, status: data.satellite_count > 0 ? 'green' : 'yellow' });
+        services.push({ name: 'Satellites', detail: data.satellite_enabled ? `Server active, ${data.satellite_count || 0} connected` : 'disabled', status: data.satellite_enabled ? 'green' : 'yellow' });
 
         const list = document.getElementById('services-list');
         list.innerHTML = services.map(s => `
@@ -534,6 +535,18 @@
         const res = await fetch('/api/integrations', { credentials: 'same-origin' });
         const data = await res.json();
         const list = document.getElementById('int-list');
+        const spotifyBtn = document.getElementById('spotify-connect-btn');
+
+        // Check if spotify exists and needs connecting
+        var hasSpotify = false;
+        var spotifyEnabled = false;
+        if (data.integrations) {
+          data.integrations.forEach(i => {
+            if (i.name === 'spotify') { hasSpotify = true; spotifyEnabled = i.enabled; }
+          });
+        }
+        // Show connect button if spotify exists but not enabled
+        spotifyBtn.style.display = (hasSpotify && !spotifyEnabled) ? 'inline-block' : 'none';
 
         if (!data.integrations || data.integrations.length === 0) {
           list.innerHTML = '<div class="service-row"><div><div class="service-name">No integrations found</div><div class="service-detail">Add .yml files to the integrations directory</div></div></div>';
@@ -544,7 +557,7 @@
           var badge = i.enabled ? '<span class="badge badge-green">Enabled</span>' : '<span class="badge badge-yellow">Disabled</span>';
           var connectBtn = '';
           if (i.name === 'spotify' && !i.enabled) {
-            connectBtn = '<button class="btn btn-sm" style="background:#1db954;color:#fff;margin-right:8px;border:none;font-size:12px" onclick="event.stopPropagation();connectSpotify()">🔗 Connect Spotify</button>';
+            connectBtn = '<button class="btn btn-sm" style="background:#1db954;color:#fff;margin-right:8px;border:none;font-size:12px" onclick="event.stopPropagation();connectSpotify()">🔗 Connect</button>';
           }
           return '<div class="service-row" style="cursor:pointer" onclick="editIntegration(\'' + i.name + '\')">' +
             '<div><div class="service-name">' + i.name + '</div><div class="service-detail">Click to edit configuration</div></div>' +

@@ -182,16 +182,17 @@ func main() {
 	// Start admin panel if enabled
 	if cfg.Admin.Enabled {
 		adminStatus := &admin.StatusProvider{
-			Version:       version,
-			Uptime:        time.Now(),
-			Provider:      cfg.Provider,
-			Model:         cfg.Model,
-			MemoryBackend: cfg.Memory.Backend,
-			Channel:       *channel,
-			ToolCount:     registry.Count(),
-			Integrations:  loader.ActiveIntegrations(),
-			VoiceSTT:      cfg.Voice.STT.Provider,
-			VoiceTTS:      cfg.Voice.TTS.Provider,
+			Version:          version,
+			Uptime:           time.Now(),
+			Provider:         cfg.Provider,
+			Model:            cfg.Model,
+			MemoryBackend:    cfg.Memory.Backend,
+			Channel:          *channel,
+			ToolCount:        registry.Count(),
+			Integrations:     loader.ActiveIntegrations(),
+			VoiceSTT:         cfg.Voice.STT.Provider,
+			VoiceTTS:         cfg.Voice.TTS.Provider,
+			SatelliteEnabled: cfg.Satellite.Enabled,
 		}
 		adminCfg := admin.Config{
 			Enabled:    true,

@@ -37,18 +37,19 @@ type Config struct {
 
 // StatusProvider gives the admin panel access to runtime state.
 type StatusProvider struct {
-	mu             sync.RWMutex
-	Version        string
-	Uptime         time.Time
-	Provider       string
-	Model          string
-	MemoryBackend  string
-	Channel        string
-	ToolCount      int
-	Integrations   []string
-	VoiceSTT       string
-	VoiceTTS       string
-	SatelliteCount int
+	mu               sync.RWMutex
+	Version          string
+	Uptime           time.Time
+	Provider         string
+	Model            string
+	MemoryBackend    string
+	Channel          string
+	ToolCount        int
+	Integrations     []string
+	VoiceSTT         string
+	VoiceTTS         string
+	SatelliteEnabled bool
+	SatelliteCount   int
 }
 
 // Server runs the admin web panel.
@@ -153,9 +154,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"channel":         s.status.Channel,
 		"tool_count":      s.status.ToolCount,
 		"integrations":    s.status.Integrations,
-		"voice_stt":       s.status.VoiceSTT,
-		"voice_tts":       s.status.VoiceTTS,
-		"satellite_count": s.status.SatelliteCount,
+		"voice_stt":         s.status.VoiceSTT,
+		"voice_tts":         s.status.VoiceTTS,
+		"satellite_enabled": s.status.SatelliteEnabled,
+		"satellite_count":   s.status.SatelliteCount,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
