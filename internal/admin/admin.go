@@ -86,6 +86,8 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/integrations/templates", s.requireAuth(s.handleIntegrationTemplates))
 	mux.HandleFunc("/api/spotify/authorize", s.requireAuth(s.handleSpotifyAuth))
 	mux.HandleFunc("/api/spotify/exchange", s.requireAuth(s.handleSpotifyExchange))
+	mux.HandleFunc("/api/gmail/authorize", s.requireAuth(s.handleGmailAuth))
+	mux.HandleFunc("/api/gmail/exchange", s.requireAuth(s.handleGmailExchange))
 	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
 	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
@@ -602,3 +604,154 @@ func (s *Server) handleSpotifyExchange(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Spotify connected! Integration will hot-reload."})
 }
 
+// ── Gmail OAuth2 ──────────────────────────────────────────────────
+
+const (
+	gmailScopes      = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify"
+	gmailRedirectURI = "http://127.0.0.1:8888/callback"
+)
+
+func (s *Server) readGmailConfig() (map[string]any, error) {
+	data, err := os.ReadFile(filepath.Join(s.integrationsDir, "gmail.yml"))
+	if err != nil {
+		return nil, fmt.Errorf("gmail.yml not found \u2014 create it first via Add Integration")
+	}
+	var cfg map[string]any
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func (s *Server) handleGmailAuth(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.readGmailConfig()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	clientID, _ := cfg["client_id"].(string)
+	if clientID == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "client_id not set in gmail.yml"})
+		return
+	}
+
+	authURL := fmt.Sprintf(
+		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&response_type=code&redirect_uri=%s&scope=%s&access_type=offline&prompt=consent",
+		clientID,
+		url.QueryEscape(gmailRedirectURI),
+		url.QueryEscape(gmailScopes),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"url": authURL, "redirect_uri": gmailRedirectURI})
+}
+
+func (s *Server) handleGmailExchange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		CallbackURL string `json:"callback_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid json"})
+		return
+	}
+
+	parsed, err := url.Parse(payload.CallbackURL)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid URL"})
+		return
+	}
+
+	code := parsed.Query().Get("code")
+	if code == "" {
+		errMsg := parsed.Query().Get("error")
+		if errMsg != "" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"error": "Authorization denied: " + errMsg})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "No authorization code found in URL"})
+		return
+	}
+
+	cfg, err := s.readGmailConfig()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	clientID, _ := cfg["client_id"].(string)
+	clientSecret, _ := cfg["client_secret"].(string)
+	if clientID == "" || clientSecret == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "client_id or client_secret missing"})
+		return
+	}
+
+	// Exchange code for tokens via Google
+	data := url.Values{
+		"code":          {code},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"redirect_uri":  {gmailRedirectURI},
+		"grant_type":    {"authorization_code"},
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.PostForm("https://oauth2.googleapis.com/token", data)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "Token exchange failed: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Google error: %s", string(body))})
+		return
+	}
+
+	var tokenResp struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	json.Unmarshal(body, &tokenResp)
+
+	if tokenResp.RefreshToken == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "No refresh_token received — make sure prompt=consent is set"})
+		return
+	}
+
+	cfg["refresh_token"] = tokenResp.RefreshToken
+	cfg["enabled"] = true
+
+	yamlData, _ := yaml.Marshal(cfg)
+	gmailPath := filepath.Join(s.integrationsDir, "gmail.yml")
+	if err := os.WriteFile(gmailPath, yamlData, 0o644); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save: " + err.Error()})
+		return
+	}
+
+	slog.Info("gmail oauth2 completed", "refresh_token_length", len(tokenResp.RefreshToken))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Gmail connected! Integration will hot-reload."})
+}

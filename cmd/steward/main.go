@@ -31,6 +31,7 @@ import (
 	"github.com/brooqs/steward/internal/voice"
 
 	// Import integrations so their init() functions register them.
+	_ "github.com/brooqs/steward/internal/integration/gmail"
 	_ "github.com/brooqs/steward/internal/integration/homeassistant"
 	_ "github.com/brooqs/steward/internal/integration/jellyfin"
 	_ "github.com/brooqs/steward/internal/integration/qbittorrent"

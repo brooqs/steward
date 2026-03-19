@@ -1,0 +1,16 @@
+# Gmail Integration
+#
+# Setup:
+# 1. Go to https://console.cloud.google.com
+# 2. Create a project or select existing one
+# 3. Enable Gmail API: APIs & Services → Library → Gmail API → Enable
+# 4. Create OAuth2 credentials: APIs & Services → Credentials → Create → OAuth Client ID
+# 5. Set application type to "Web application"
+# 6. Add redirect URI: http://127.0.0.1:8888/callback
+# 7. Fill in client_id and client_secret below
+# 8. Go to the Gmail page in the admin panel and follow the OAuth flow
+#
+enabled: true
+client_id: ""
+client_secret: ""
+refresh_token: ""
