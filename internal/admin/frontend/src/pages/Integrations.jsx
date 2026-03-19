@@ -11,20 +11,32 @@ export function Integrations() {
 
   const load = () => {
     Promise.all([
-      fetch('/api/integrations').then(r => r.json()),
-      fetch('/api/integrations/templates').then(r => r.json()),
+      fetch('/api/integrations').then(r => r.json()).then(d => d.integrations || []),
+      fetch('/api/integrations/templates').then(r => r.json()).then(d => d.templates || []).catch(() => []),
     ]).then(([intgs, tmpls]) => {
-      setIntegrations(intgs || []);
-      setTemplates(tmpls || []);
+      setIntegrations(intgs);
+      setTemplates(tmpls);
       setLoading(false);
     }).catch(() => setLoading(false));
   };
 
   useEffect(load, []);
 
-  const openEditor = (name, content) => {
-    setEditName(name);
-    setEditContent(content || '');
+  const openEditor = async (name, content) => {
+    if (content) {
+      setEditName(name);
+      setEditContent(content);
+      return;
+    }
+    // Fetch content from API for existing integrations
+    try {
+      const res = await fetch(`/api/integrations?name=${name}`);
+      const data = await res.json();
+      setEditName(name);
+      setEditContent(data.raw || '');
+    } catch {
+      toast('Failed to load integration config', 'error');
+    }
   };
 
   const saveIntegration = async () => {
