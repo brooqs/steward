@@ -18,21 +18,28 @@
 
 ## 🔜 Next Up
 
+### Hybrid AI: BitNet + LLM (Two-Tier Architecture)
+Use a local 1-bit BitNet model for fast tool dispatch, keep the cloud LLM for personality and conversation.
+
+```
+User message → BitNet (local, instant, free)
+  ├─ intent: "tool_call" → dispatch tool directly (no LLM needed)
+  └─ intent: "conversation" → forward to LLM (Claude/GPT personality)
+```
+
+- **BitNet b1.58 2B4T** (~0.4GB RAM) or **Llama3-8B-1.58** (~1.5GB) via `bitnet.cpp`
+- Intent classification + tool parameter extraction runs locally on CPU
+- Simple commands ("ışığı aç", "müzik çal") never hit the cloud API
+- Complex/conversational queries go to LLM as usual
+- Drastically reduces API costs and latency for home automation
+
 ### Tool Knowledge Base (Embedding Cache)
-Cache tool results as embeddings for semantic retrieval. Instead of calling integrations every time, search cached results first.
+Cache tool results as embeddings for semantic retrieval.
 
 - Cache HA entity lists, Spotify playlists, Jellyfin libraries
 - Semantic search: "yatak odası ışığı" → `light.yatak_odasi`
 - TTL-based cache invalidation with manual refresh
 - Reduces API calls and token usage
-
-### Local ONNX Inference
-Run embedding models locally without Ollama dependency.
-
-- Download ONNX model + runtime from HuggingFace
-- Pure Go tokenizer (WordPiece for BERT)
-- `onnxruntime_go` integration (CGO or purego)
-- Fully offline embedding support
 
 ### Multi-User Support
 Per-user memory, sessions, and permissions.
