@@ -77,6 +77,8 @@ whatsapp:
   listen_addr: "0.0.0.0:8765"
   bridge_url: "http://localhost:3000"
   webhook_secret: ""
+  allowed_ids:                   # phone number whitelist
+    - "905xxxxxxxxxx"
 
 # ── Integrations ──────────────────────────────────────────────
 integrations_dir: "/etc/steward/integrations"

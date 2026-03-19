@@ -8,6 +8,7 @@ Steward is designed with security-first defaults. This guide covers hardening fo
 |---------|---------|--------|
 | Shell tool | **Disabled** | Prevents unintended command execution |
 | Telegram | **No whitelist** | Must configure `allowed_ids` |
+| WhatsApp | **No whitelist** | Must configure `allowed_ids` (phone numbers) |
 | Satellite | **Disabled** | Requires explicit auth tokens |
 | Admin panel | **Disabled** | Requires explicit credentials |
 
@@ -55,12 +56,20 @@ Get your ID: message [@userinfobot](https://t.me/userinfobot) on Telegram.
 
 ## WhatsApp Security
 
-Use a webhook secret to verify incoming messages:
+Restrict who can message your WhatsApp bot using phone number whitelist:
 
 ```yaml
 whatsapp:
+  bridge_url: "http://localhost:3000"
   webhook_secret: "random-secret-string"
+  allowed_ids:
+    - "905xxxxxxxxxx"            # your phone number
+    - "901234567890"             # another trusted user
 ```
+
+The bridge resolves each sender's phone number via `getContact()` and matches it against the allow list. Messages from unlisted numbers are silently ignored.
+
+> ⚠️ **Always set `allowed_ids` in production** — without it, anyone who messages the bot will get a response.
 
 ## Satellite Security
 

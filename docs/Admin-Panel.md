@@ -26,6 +26,26 @@ The dashboard shows real-time status:
 
 Status auto-refreshes every 5 seconds.
 
+## Channels Page
+
+Manage WhatsApp and Telegram channel configuration:
+
+- **WhatsApp Bridge Status** — shows connected/disconnected state, QR code for pairing, message count
+- **WhatsApp Configuration** — listen address, bridge URL, webhook secret, allowed phone numbers
+- **Telegram Configuration** — bot token, allowed user IDs
+
+When the bridge is disconnected, a QR code is displayed for scanning with WhatsApp → Settings → Linked Devices → Link a Device.
+
+## Restart Button
+
+The 🔄 **Restart** button in the top-right corner restarts the Steward service:
+
+1. Click the button → confirmation dialog appears
+2. Confirm → service restarts (systemd automatically brings it back)
+3. Page auto-reloads when the service is back online
+
+Useful after config changes, which require a restart to take effect.
+
 ## Settings Editor
 
 The settings page provides a YAML editor for `core.yml`:
@@ -43,7 +63,19 @@ All endpoints require Basic Auth.
 |--------|----------|-------------|
 | GET | `/api/status` | Runtime status (JSON) |
 | GET | `/api/config` | Current config (JSON + raw YAML) |
-| POST | `/api/config/save` | Save config (body: `{"content": "..."}`) |
+| POST | `/api/config/save` | Save config changes |
+| POST | `/api/restart` | Restart Steward service |
+| GET | `/api/integrations` | List all integrations |
+| POST | `/api/integrations/save` | Save integration config |
+| GET | `/api/integrations/templates` | List available templates |
+| GET | `/api/cron/jobs` | List cron jobs |
+| POST | `/api/cron/delete` | Delete a cron job |
+| GET | `/api/whatsapp/*` | Proxy to WhatsApp bridge |
+| GET | `/api/logs` | Log viewing info |
+| GET | `/api/spotify/authorize` | Start Spotify OAuth |
+| POST | `/api/spotify/exchange` | Complete Spotify OAuth |
+| GET | `/api/gmail/authorize` | Start Google OAuth |
+| POST | `/api/gmail/exchange` | Complete Google OAuth |
 
 ### Example
 

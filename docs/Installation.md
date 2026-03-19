@@ -20,19 +20,34 @@ This will:
 
 ```bash
 # Download (replace VERSION, OS, ARCH)
-wget https://github.com/brooqs/steward/releases/download/v1.0.0/steward_1.0.0_linux_amd64.tar.gz
-tar xzf steward_1.0.0_linux_amd64.tar.gz
+wget https://github.com/brooqs/steward/releases/download/v1.2.0/steward_1.2.0_linux_amd64.tar.gz
+tar xzf steward_1.2.0_linux_amd64.tar.gz
 
 # Install
 sudo install -m 755 steward /usr/local/bin/
 sudo install -m 755 steward-satellite /usr/local/bin/
 ```
 
+### Arch Linux (AUR)
+
+```bash
+yay -S steward
+```
+
+Or with any AUR helper (`paru`, `yay`, etc.). The PKGBUILD builds from source with Go + Node.js.
+
 ### From Source
 
 ```bash
 git clone https://github.com/brooqs/steward.git
 cd steward
+
+# Build embedded admin frontend
+cd internal/admin/frontend
+npm ci && npm run build
+cd ../../..
+
+# Build binaries
 go build -o steward ./cmd/steward
 go build -o steward-satellite ./cmd/satellite
 ```
@@ -40,15 +55,15 @@ go build -o steward-satellite ./cmd/satellite
 ### DEB Package (Debian/Ubuntu)
 
 ```bash
-wget https://github.com/brooqs/steward/releases/download/v1.0.0/steward_1.0.0_linux_amd64.deb
-sudo dpkg -i steward_1.0.0_linux_amd64.deb
+wget https://github.com/brooqs/steward/releases/download/v1.2.0/steward_1.2.0_linux_amd64.deb
+sudo dpkg -i steward_1.2.0_linux_amd64.deb
 ```
 
 ### RPM Package (RHEL/Fedora)
 
 ```bash
-wget https://github.com/brooqs/steward/releases/download/v1.0.0/steward_1.0.0_linux_amd64.rpm
-sudo rpm -i steward_1.0.0_linux_amd64.rpm
+wget https://github.com/brooqs/steward/releases/download/v1.2.0/steward_1.2.0_linux_amd64.rpm
+sudo rpm -i steward_1.2.0_linux_amd64.rpm
 ```
 
 ## Docker
@@ -97,8 +112,8 @@ journalctl -u steward -f
 
 | OS | Architecture | Binary | Package |
 |----|-------------|--------|---------|
-| Linux | amd64 | ✅ | .deb, .rpm |
-| Linux | arm64 | ✅ | .deb, .rpm |
+| Linux | amd64 | ✅ | .deb, .rpm, AUR |
+| Linux | arm64 | ✅ | .deb, .rpm, AUR |
 | macOS | amd64 (Intel) | ✅ | — |
 | macOS | arm64 (Apple Silicon) | ✅ | — |
 | Windows | amd64 | ✅ | — |
