@@ -24,6 +24,7 @@ import (
 	"github.com/brooqs/steward/internal/channel/whatsapp"
 	"github.com/brooqs/steward/internal/config"
 	"github.com/brooqs/steward/internal/core"
+	"github.com/brooqs/steward/internal/embedding"
 	"github.com/brooqs/steward/internal/integration"
 	"github.com/brooqs/steward/internal/memory"
 	"github.com/brooqs/steward/internal/provider"
@@ -158,10 +159,26 @@ func main() {
 		}
 	}
 
+	// Create embedder for dynamic tool selection (optional)
+	var embedder embedding.Embedder
+	if cfg.Memory.Embedding.Enabled {
+		emb, err := embedding.New(cfg.Memory.Embedding)
+		if err != nil {
+			slog.Warn("embedder init failed, using all tools", "error", err)
+		} else if emb != nil {
+			embedder = emb
+			slog.Info("embedder ready for tool selection", "provider", emb.Name(), "dimensions", emb.Dimensions())
+		}
+	}
+
+	// Create tool selector
+	toolSelector := tools.NewToolSelector(registry, embedder, 10)
+
 	// Create the agent
 	steward := core.New(core.Config{
 		Provider:     llm,
 		Registry:     registry,
+		ToolSelector: toolSelector,
 		Memory:       store,
 		Model:        cfg.Model,
 		MaxTokens:    cfg.MaxTokens,
@@ -186,6 +203,13 @@ func main() {
 		"tools", registry.Count(),
 		"integrations", loader.ActiveIntegrations(),
 	)
+
+	// Index tool embeddings for dynamic selection (after all tools registered)
+	if embedder != nil {
+		if err := toolSelector.IndexTools(context.Background()); err != nil {
+			slog.Warn("tool indexing failed, using all tools", "error", err)
+		}
+	}
 
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

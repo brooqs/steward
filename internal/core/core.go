@@ -20,19 +20,21 @@ const maxToolIterations = 5
 
 // Steward is the central agent.
 type Steward struct {
-	provider  provider.Provider
-	registry  *tools.Registry
-	memory    memory.Store
-	model     string
-	maxTokens int
-	sysPrompt string
-	policies  []string
+	provider     provider.Provider
+	registry     *tools.Registry
+	toolSelector *tools.ToolSelector
+	memory       memory.Store
+	model        string
+	maxTokens    int
+	sysPrompt    string
+	policies     []string
 }
 
 // Config holds the parameters needed to create a Steward agent.
 type Config struct {
 	Provider     provider.Provider
 	Registry     *tools.Registry
+	ToolSelector *tools.ToolSelector
 	Memory       memory.Store
 	Model        string
 	MaxTokens    int
@@ -43,13 +45,14 @@ type Config struct {
 // New creates a new Steward agent.
 func New(cfg Config) *Steward {
 	return &Steward{
-		provider:  cfg.Provider,
-		registry:  cfg.Registry,
-		memory:    cfg.Memory,
-		model:     cfg.Model,
-		maxTokens: cfg.MaxTokens,
-		sysPrompt: cfg.SystemPrompt,
-		policies:  cfg.Policies,
+		provider:     cfg.Provider,
+		registry:     cfg.Registry,
+		toolSelector: cfg.ToolSelector,
+		memory:       cfg.Memory,
+		model:        cfg.Model,
+		maxTokens:    cfg.MaxTokens,
+		sysPrompt:    cfg.SystemPrompt,
+		policies:     cfg.Policies,
 	}
 }
 
@@ -158,7 +161,7 @@ func (s *Steward) Chat(ctx context.Context, sessionID, userMessage string) (stri
 	}
 
 	// 4. Run the agent turn (may loop for tool calls)
-	responseText, err := s.runTurn(ctx, messages)
+	responseText, err := s.runTurn(ctx, userMessage, messages)
 	if err != nil {
 		slog.Error("chat failed", "session", sessionID, "duration", time.Since(start), "error", err)
 		return "", fmt.Errorf("agent turn failed: %w", err)
@@ -181,13 +184,22 @@ func (s *Steward) Chat(ctx context.Context, sessionID, userMessage string) (stri
 
 // runTurn executes one or more LLM API calls, handling tool_use blocks
 // until a final text response is reached.
-func (s *Steward) runTurn(ctx context.Context, messages []provider.Message) (string, error) {
+func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []provider.Message) (string, error) {
 	currentMessages := make([]provider.Message, len(messages))
 	copy(currentMessages, messages)
 
-	toolSchemas := s.registry.GetSchemas()
+	// Track tools used in this turn for pinning
+	var usedTools []string
 
 	for i := 0; i < maxToolIterations; i++ {
+		// Dynamic tool selection: pick most relevant tools for this message
+		var toolSchemas []provider.ToolSchema
+		if s.toolSelector != nil {
+			toolSchemas = s.toolSelector.SelectTools(ctx, userMessage, usedTools)
+		} else {
+			toolSchemas = s.registry.GetSchemas()
+		}
+
 		req := &provider.Request{
 			Model:        s.model,
 			SystemPrompt: s.buildSystemPrompt(),
@@ -225,6 +237,9 @@ func (s *Steward) runTurn(ctx context.Context, messages []provider.Message) (str
 			for _, tc := range toolCalls {
 				toolStart := time.Now()
 				slog.Info("tool call", "name", tc.ToolName, "input", tc.ToolInput)
+
+				// Track used tools for pinning in next iteration
+				usedTools = append(usedTools, tc.ToolName)
 
 				result, err := s.registry.Dispatch(tc.ToolName, tc.ToolInput)
 				if err != nil {
