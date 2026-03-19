@@ -660,14 +660,39 @@ func (s *Server) readSpotifyConfig() (map[string]any, error) {
 }
 
 func (s *Server) handleSpotifyAuth(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.readSpotifyConfig()
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
+	var clientID string
+
+	// Accept POST with client_id/client_secret from frontend
+	if r.Method == http.MethodPost {
+		var payload struct {
+			ClientID     string `json:"client_id"`
+			ClientSecret string `json:"client_secret"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err == nil && payload.ClientID != "" {
+			// Save to spotify.yml
+			cfg := map[string]any{
+				"enabled":       true,
+				"client_id":     payload.ClientID,
+				"client_secret": payload.ClientSecret,
+			}
+			yamlData, _ := yaml.Marshal(cfg)
+			spotifyPath := filepath.Join(s.integrationsDir, "spotify.yml")
+			os.WriteFile(spotifyPath, yamlData, 0o644)
+			clientID = payload.ClientID
+		}
 	}
 
-	clientID, _ := cfg["client_id"].(string)
+	// Fallback: read from spotify.yml
+	if clientID == "" {
+		cfg, err := s.readSpotifyConfig()
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		clientID, _ = cfg["client_id"].(string)
+	}
+
 	if clientID == "" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"error": "client_id not set in spotify.yml"})
@@ -682,7 +707,7 @@ func (s *Server) handleSpotifyAuth(w http.ResponseWriter, r *http.Request) {
 	)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"url": authURL, "redirect_uri": spotifyRedirectURI})
+	json.NewEncoder(w).Encode(map[string]string{"auth_url": authURL, "redirect_uri": spotifyRedirectURI})
 }
 
 func (s *Server) handleSpotifyExchange(w http.ResponseWriter, r *http.Request) {
