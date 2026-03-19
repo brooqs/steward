@@ -23,7 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed static/*
+//go:embed dist/*
 var staticFiles embed.FS
 
 // Config holds admin panel configuration.
@@ -58,10 +58,28 @@ type Server struct {
 	configPath      string
 	integrationsDir string
 	status          *StatusProvider
+	scheduler       CronJobProvider
+}
+
+// CronJobProvider is used by the admin panel to list/delete cron jobs.
+type CronJobProvider interface {
+	ListJobs() []CronJobInfo
+	RemoveJob(id string) error
+}
+
+// CronJobInfo holds cron job data for the admin API.
+type CronJobInfo struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Schedule  string `json:"schedule"`
+	Prompt    string `json:"prompt"`
+	Channel   string `json:"channel"`
+	Enabled   bool   `json:"enabled"`
+	CreatedAt string `json:"created_at"`
 }
 
 // NewServer creates an admin panel server.
-func NewServer(cfg Config, configPath, integrationsDir string, status *StatusProvider) *Server {
+func NewServer(cfg Config, configPath, integrationsDir string, status *StatusProvider, sched CronJobProvider) *Server {
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = "0.0.0.0:8080"
 	}
@@ -70,6 +88,7 @@ func NewServer(cfg Config, configPath, integrationsDir string, status *StatusPro
 		configPath:      configPath,
 		integrationsDir: integrationsDir,
 		status:          status,
+		scheduler:       sched,
 	}
 }
 
@@ -89,14 +108,26 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/gmail/authorize", s.requireAuth(s.handleGmailAuth))
 	mux.HandleFunc("/api/gmail/exchange", s.requireAuth(s.handleGmailExchange))
 	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
+	mux.HandleFunc("/api/policies", s.requireAuth(s.handlePolicies))
+	mux.HandleFunc("/api/policies/save", s.requireAuth(s.handlePoliciesSave))
+	mux.HandleFunc("/api/cron/jobs", s.requireAuth(s.handleCronJobs))
+	mux.HandleFunc("/api/cron/delete", s.requireAuth(s.handleCronDelete))
 	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
-	// Static files (embedded)
-	staticFS, err := fs.Sub(staticFiles, "static")
+	// Serve Preact SPA (embedded)
+	distFS, err := fs.Sub(staticFiles, "dist")
 	if err != nil {
-		return fmt.Errorf("creating static FS: %w", err)
+		return fmt.Errorf("creating dist FS: %w", err)
 	}
-	mux.Handle("/", s.requireAuthHandler(http.FileServer(http.FS(staticFS))))
+	fileServer := http.FileServer(http.FS(distFS))
+	mux.Handle("/", s.requireAuthHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// SPA fallback: serve index.html for non-file paths
+		path := r.URL.Path
+		if path != "/" && !strings.Contains(path, ".") {
+			r.URL.Path = "/"
+		}
+		fileServer.ServeHTTP(w, r)
+	})))
 
 	srv := &http.Server{
 		Addr:    s.cfg.ListenAddr,
@@ -753,4 +784,108 @@ func (s *Server) handleGmailExchange(w http.ResponseWriter, r *http.Request) {
 	slog.Info("google oauth2 completed", "refresh_token_length", len(tokenResp.RefreshToken))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Google connected! Gmail, Calendar & Drive will hot-reload."})
+}
+
+// ── Policies Handlers ─────────────────────────────────────────
+
+func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(s.configPath)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{"policies": []string{}})
+		return
+	}
+
+	var raw map[string]any
+	yaml.Unmarshal(data, &raw)
+
+	policies, _ := raw["policies"]
+	if policies == nil {
+		policies = []string{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"policies": policies})
+}
+
+func (s *Server) handlePoliciesSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "POST only", 405)
+		return
+	}
+
+	var req struct {
+		Policies []string `json:"policies"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+
+	// Read existing config
+	data, err := os.ReadFile(s.configPath)
+	if err != nil {
+		http.Error(w, "Failed to read config", 500)
+		return
+	}
+
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		http.Error(w, "Failed to parse config", 500)
+		return
+	}
+
+	raw["policies"] = req.Policies
+
+	yamlData, _ := yaml.Marshal(raw)
+	if err := os.WriteFile(s.configPath, yamlData, 0o644); err != nil {
+		http.Error(w, "Failed to save", 500)
+		return
+	}
+
+	slog.Info("policies updated", "count", len(req.Policies))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// ── Cron Handlers ─────────────────────────────────────────────
+
+func (s *Server) handleCronJobs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.scheduler == nil {
+		json.NewEncoder(w).Encode(map[string]any{"jobs": []any{}, "count": 0})
+		return
+	}
+
+	jobs := s.scheduler.ListJobs()
+	json.NewEncoder(w).Encode(map[string]any{"jobs": jobs, "count": len(jobs)})
+}
+
+func (s *Server) handleCronDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "POST only", 405)
+		return
+	}
+
+	var req struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+
+	if s.scheduler == nil {
+		http.Error(w, "Scheduler not available", 500)
+		return
+	}
+
+	if err := s.scheduler.RemoveJob(req.JobID); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }

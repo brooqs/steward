@@ -43,6 +43,9 @@ type Config struct {
 	Telegram TelegramConfig `yaml:"telegram"`
 	WhatsApp WhatsAppConfig `yaml:"whatsapp"`
 
+	// AI Policies
+	Policies []string `yaml:"policies"`
+
 	// Paths
 	IntegrationsDir string `yaml:"integrations_dir"`
 }

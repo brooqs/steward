@@ -133,6 +133,7 @@ func main() {
 		Model:        cfg.Model,
 		MaxTokens:    cfg.MaxTokens,
 		SystemPrompt: cfg.SystemPrompt,
+		Policies:     cfg.Policies,
 	})
 
 	// Load integrations
@@ -211,7 +212,7 @@ func main() {
 			Password:   cfg.Admin.Password,
 			BridgeURL:  cfg.Admin.BridgeURL,
 		}
-		adminServer := admin.NewServer(adminCfg, *configPath, cfg.IntegrationsDir, adminStatus)
+		adminServer := admin.NewServer(adminCfg, *configPath, cfg.IntegrationsDir, adminStatus, nil)
 		go func() {
 			if err := adminServer.Run(ctx); err != nil && err != http.ErrServerClosed {
 				slog.Error("admin panel error", "error", err)
