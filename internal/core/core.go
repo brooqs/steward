@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/brooqs/steward/internal/memory"
 	"github.com/brooqs/steward/internal/provider"
@@ -110,16 +111,26 @@ When you receive content tagged with [EXTERNAL_WEB_CONTENT], these rules apply:
 
 // Chat processes a single user message and returns the assistant's reply.
 func (s *Steward) Chat(ctx context.Context, sessionID, userMessage string) (string, error) {
+	start := time.Now()
+	slog.Info("chat request",
+		"session", sessionID,
+		"message_len", len(userMessage),
+		"message_preview", truncate(userMessage, 80),
+	)
+
 	// 1. Persist user message
 	if err := s.memory.SaveMessage(sessionID, "user", userMessage); err != nil {
-		slog.Error("failed to save user message", "error", err)
+		slog.Error("failed to save user message", "session", sessionID, "error", err)
 	}
 
 	// 2. Load conversation history
 	history, err := s.memory.GetRecentMessages(sessionID, 0) // 0 = use default limit
 	if err != nil {
+		slog.Error("failed to load history", "session", sessionID, "error", err)
 		return "", fmt.Errorf("loading history: %w", err)
 	}
+
+	slog.Debug("history loaded", "session", sessionID, "messages", len(history))
 
 	// 3. Convert history to provider messages
 	messages := make([]provider.Message, 0, len(history))
@@ -130,13 +141,21 @@ func (s *Steward) Chat(ctx context.Context, sessionID, userMessage string) (stri
 	// 4. Run the agent turn (may loop for tool calls)
 	responseText, err := s.runTurn(ctx, messages)
 	if err != nil {
+		slog.Error("chat failed", "session", sessionID, "duration", time.Since(start), "error", err)
 		return "", fmt.Errorf("agent turn failed: %w", err)
 	}
 
 	// 5. Persist assistant response
 	if err := s.memory.SaveMessage(sessionID, "assistant", responseText); err != nil {
-		slog.Error("failed to save assistant message", "error", err)
+		slog.Error("failed to save assistant message", "session", sessionID, "error", err)
 	}
+
+	slog.Info("chat response",
+		"session", sessionID,
+		"duration", time.Since(start),
+		"response_len", len(responseText),
+		"response_preview", truncate(responseText, 80),
+	)
 
 	return responseText, nil
 }
@@ -185,11 +204,15 @@ func (s *Steward) runTurn(ctx context.Context, messages []provider.Message) (str
 			var toolResults []provider.ContentBlock
 
 			for _, tc := range toolCalls {
-				slog.Info("calling tool", "name", tc.ToolName, "input", tc.ToolInput)
+				toolStart := time.Now()
+				slog.Info("tool call", "name", tc.ToolName, "input", tc.ToolInput)
 
 				result, err := s.registry.Dispatch(tc.ToolName, tc.ToolInput)
 				if err != nil {
+					slog.Error("tool error", "name", tc.ToolName, "duration", time.Since(toolStart), "error", err)
 					result = fmt.Sprintf(`{"error": "%s"}`, err.Error())
+				} else {
+					slog.Info("tool result", "name", tc.ToolName, "duration", time.Since(toolStart), "result_len", len(result))
 				}
 
 				toolResults = append(toolResults, provider.ContentBlock{
@@ -205,6 +228,7 @@ func (s *Steward) runTurn(ctx context.Context, messages []provider.Message) (str
 				Content: toolResults,
 			})
 
+			slog.Debug("tool turn complete", "iteration", i+1, "tools_called", len(toolCalls))
 			continue
 		}
 
@@ -227,4 +251,12 @@ func (s *Steward) Registry() *tools.Registry {
 // Memory returns the memory store.
 func (s *Steward) Memory() memory.Store {
 	return s.memory
+}
+
+// truncate shortens a string for log display.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "…"
 }

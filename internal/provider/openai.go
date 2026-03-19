@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -108,6 +109,9 @@ type oaiError struct {
 }
 
 func (o *OpenAI) ChatCompletion(ctx context.Context, req *Request) (*Response, error) {
+	apiStart := time.Now()
+	slog.Debug("llm request", "provider", o.name, "model", req.Model, "messages", len(req.Messages), "tools", len(req.Tools))
+
 	// Build messages — system prompt goes as a system message
 	msgs := make([]oaiMessage, 0, len(req.Messages)+1)
 	if req.SystemPrompt != "" {
@@ -233,6 +237,7 @@ func (o *OpenAI) ChatCompletion(ctx context.Context, req *Request) (*Response, e
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		slog.Error("llm api error", "provider", o.name, "status", resp.StatusCode, "duration", time.Since(apiStart), "body", string(respBody))
 		return nil, fmt.Errorf("%s: api returned %d: %s", o.name, resp.StatusCode, string(respBody))
 	}
 
@@ -261,6 +266,13 @@ func (o *OpenAI) ChatCompletion(ctx context.Context, req *Request) (*Response, e
 	default:
 		result.StopReason = choice.FinishReason
 	}
+
+	slog.Info("llm response",
+		"provider", o.name,
+		"duration", time.Since(apiStart),
+		"stop_reason", result.StopReason,
+		"tool_calls", len(choice.Message.ToolCalls),
+	)
 
 	// Extract text content
 	if text, ok := choice.Message.Content.(string); ok && text != "" {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -78,6 +79,9 @@ type claudeError struct {
 }
 
 func (c *Claude) ChatCompletion(ctx context.Context, req *Request) (*Response, error) {
+	apiStart := time.Now()
+	slog.Debug("llm request", "provider", "claude", "model", req.Model, "messages", len(req.Messages), "tools", len(req.Tools))
+
 	// Convert messages
 	msgs := make([]claudeMessage, 0, len(req.Messages))
 	for _, m := range req.Messages {
@@ -145,6 +149,7 @@ func (c *Claude) ChatCompletion(ctx context.Context, req *Request) (*Response, e
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		slog.Error("llm api error", "provider", "claude", "status", resp.StatusCode, "duration", time.Since(apiStart), "body", string(respBody))
 		return nil, fmt.Errorf("claude: api returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -173,6 +178,19 @@ func (c *Claude) ChatCompletion(ctx context.Context, req *Request) (*Response, e
 		}
 		result.Content = append(result.Content, cb)
 	}
+
+	toolCallCount := 0
+	for _, b := range cr.Content {
+		if b.Type == "tool_use" {
+			toolCallCount++
+		}
+	}
+	slog.Info("llm response",
+		"provider", "claude",
+		"duration", time.Since(apiStart),
+		"stop_reason", cr.StopReason,
+		"tool_calls", toolCallCount,
+	)
 
 	return result, nil
 }
