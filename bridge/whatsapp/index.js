@@ -64,13 +64,20 @@ client.on('message', async (msg) => {
   const from = msg.from;
   state.messageCount++;
 
+  // Resolve phone number from contact
+  let phone = '';
+  try {
+    const contact = await msg.getContact();
+    phone = contact.number || '';  // e.g. "905xxxxxxxxxx"
+  } catch {}
+
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (WEBHOOK_SECRET) headers['X-Webhook-Secret'] = WEBHOOK_SECRET;
 
     // Voice message (ptt = push-to-talk voice note, audio = audio file)
     if (msg.hasMedia && (msg.type === 'ptt' || msg.type === 'audio')) {
-      console.log('🎤 ' + from + ': [voice message]');
+      console.log('🎤 ' + from + ' (' + phone + '): [voice message]');
 
       const media = await msg.downloadMedia();
       if (media && media.data) {
@@ -79,6 +86,7 @@ client.on('message', async (msg) => {
           headers,
           body: JSON.stringify({
             from,
+            phone,
             message: '',
             audio_base64: media.data,
             audio_mimetype: media.mimetype || 'audio/ogg'
@@ -93,12 +101,12 @@ client.on('message', async (msg) => {
     const text = (msg.body || '').trim();
     if (!text) return;
 
-    console.log('📩 ' + from + ': ' + text.substring(0, 80));
+    console.log('📩 ' + from + ' (' + phone + '): ' + text.substring(0, 80));
 
     const res = await fetch(STEWARD_URL + '/message', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ from, message: text })
+      body: JSON.stringify({ from, phone, message: text })
     });
     console.log('→ Steward: ' + res.status);
   } catch (err) {

@@ -48,13 +48,66 @@ type claudeMessage struct {
 }
 
 type claudeContentBlock struct {
-	Type      string         `json:"type"`
-	Text      string         `json:"text,omitempty"`
-	ID        string         `json:"id,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	Input     map[string]any `json:"input,omitempty"`
-	ToolUseID string         `json:"tool_use_id,omitempty"`
-	Content   string         `json:"content,omitempty"`
+	Type      string         `json:"-"`
+	Text      string         `json:"-"`
+	ID        string         `json:"-"`
+	Name      string         `json:"-"`
+	Input     map[string]any `json:"-"`
+	ToolUseID string         `json:"-"`
+	Content   string         `json:"-"`
+}
+
+// MarshalJSON serializes each content block type with exactly the fields
+// Claude expects — no extra fields that trigger "Extra inputs not permitted".
+func (b claudeContentBlock) MarshalJSON() ([]byte, error) {
+	switch b.Type {
+	case "tool_use":
+		input := b.Input
+		if input == nil {
+			input = map[string]any{}
+		}
+		return json.Marshal(struct {
+			Type  string         `json:"type"`
+			ID    string         `json:"id"`
+			Name  string         `json:"name"`
+			Input map[string]any `json:"input"`
+		}{b.Type, b.ID, b.Name, input})
+	case "tool_result":
+		return json.Marshal(struct {
+			Type      string `json:"type"`
+			ToolUseID string `json:"tool_use_id"`
+			Content   string `json:"content"`
+		}{b.Type, b.ToolUseID, b.Content})
+	default: // text
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{b.Type, b.Text})
+	}
+}
+
+// UnmarshalJSON parses Claude API response content blocks.
+func (b *claudeContentBlock) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Type      string         `json:"type"`
+		Text      string         `json:"text"`
+		ID        string         `json:"id"`
+		Name      string         `json:"name"`
+		Input     map[string]any `json:"input"`
+		ToolUseID string         `json:"tool_use_id"`
+		Content   string         `json:"content"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	b.Type = raw.Type
+	b.Text = raw.Text
+	b.ID = raw.ID
+	b.Name = raw.Name
+	b.Input = raw.Input
+	b.ToolUseID = raw.ToolUseID
+	b.Content = raw.Content
+	return nil
 }
 
 type claudeTool struct {
@@ -99,6 +152,9 @@ func (c *Claude) ChatCompletion(ctx context.Context, req *Request) (*Response, e
 					cb.ID = b.ToolUseID
 					cb.Name = b.ToolName
 					cb.Input = b.ToolInput
+					if cb.Input == nil {
+						cb.Input = map[string]any{}
+					}
 				case "tool_result":
 					cb.ToolUseID = b.ToolResultID
 					cb.Content = b.Content

@@ -27,6 +27,7 @@ type Channel struct {
 	listenAddr  string
 	bridgeURL   string
 	secret      string
+	allowedIDs  map[string]bool // phone numbers; empty = allow all
 	httpClient  *http.Client
 }
 
@@ -39,12 +40,20 @@ func New(steward *core.Steward, cfg config.WhatsAppConfig, ve *voice.Engine) (*C
 	if addr == "" {
 		addr = "0.0.0.0:8765"
 	}
+	allowed := make(map[string]bool, len(cfg.AllowedIDs))
+	for _, id := range cfg.AllowedIDs {
+		allowed[strings.TrimSpace(id)] = true
+	}
+	if len(allowed) > 0 {
+		slog.Info("whatsapp allow list", "count", len(allowed))
+	}
 	return &Channel{
 		steward:     steward,
 		voiceEngine: ve,
 		listenAddr:  addr,
 		bridgeURL:   strings.TrimRight(cfg.BridgeURL, "/"),
 		secret:      cfg.WebhookSecret,
+		allowedIDs:  allowed,
 		httpClient:  &http.Client{Timeout: 15 * time.Second},
 	}, nil
 }
@@ -79,6 +88,7 @@ func (ch *Channel) Run(ctx context.Context) error {
 
 type webhookPayload struct {
 	From          string `json:"from"`
+	Phone         string `json:"phone"`
 	Message       string `json:"message"`
 	AudioBase64   string `json:"audio_base64,omitempty"`
 	AudioMimetype string `json:"audio_mimetype,omitempty"`
@@ -110,6 +120,20 @@ func (ch *Channel) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ignored"))
 		return
+	}
+
+	// Security: check allow list
+	phone := strings.TrimSpace(payload.Phone)
+	if len(ch.allowedIDs) > 0 {
+		if !ch.allowedIDs[phone] && !ch.allowedIDs[sender] {
+			slog.Warn("unauthorized whatsapp message",
+				"from", sender,
+				"phone", phone,
+			)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("ignored"))
+			return
+		}
 	}
 
 	// Voice message → STT

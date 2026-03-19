@@ -17,7 +17,7 @@ function WhatsAppBridge({ toast }) {
 
   const pollBridge = async () => {
     try {
-      const res = await fetch('/api/whatsapp/status');
+      const res = await fetch('/api/whatsapp/health');
       const data = await res.json();
       setBridgeStatus(data);
       setBridgeError(false);
@@ -178,6 +178,11 @@ export function Channels() {
         <div class="form-group">
           <label>Webhook Secret</label>
           <input type="password" value={wa.webhook_secret || ''} onInput={e => update('whatsapp', 'webhook_secret', e.target.value)} placeholder="${WHATSAPP_WEBHOOK_SECRET}" />
+        </div>
+        <div class="form-group">
+          <label>Allowed Phone Numbers (comma separated)</label>
+          <input type="text" value={(wa.allowed_ids || []).join(', ')} onInput={e => update('whatsapp', 'allowed_ids', e.target.value.split(',').map(s => s.trim()).filter(s => s))} placeholder="905xxxxxxxxxx, 905yyyyyyyyyy" />
+          <span style="font-size: 11px; color: var(--text-muted);">Leave empty to allow anyone (⚠️ not recommended)</span>
         </div>
       </div>
 

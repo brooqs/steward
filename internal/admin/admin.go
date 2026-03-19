@@ -112,6 +112,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/policies/save", s.requireAuth(s.handlePoliciesSave))
 	mux.HandleFunc("/api/cron/jobs", s.requireAuth(s.handleCronJobs))
 	mux.HandleFunc("/api/cron/delete", s.requireAuth(s.handleCronDelete))
+	mux.HandleFunc("/api/restart", s.requireAuth(s.handleRestart))
 	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
 	// Serve Preact SPA (embedded)
@@ -281,6 +282,22 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Use 'journalctl -u steward -n 100' on the server to view logs",
 	})
+}
+
+func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	slog.Info("restart requested via admin panel")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "restarting"})
+
+	// Exit after response is sent — systemd will restart us
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	}()
 }
 
 // handleBridgeProxy forwards requests to the WhatsApp bridge.

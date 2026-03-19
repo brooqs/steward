@@ -86,9 +86,10 @@ type TelegramConfig struct {
 
 // WhatsAppConfig holds WhatsApp bridge settings.
 type WhatsAppConfig struct {
-	ListenAddr    string `yaml:"listen_addr"`
-	BridgeURL     string `yaml:"bridge_url"`
-	WebhookSecret string `yaml:"webhook_secret"`
+	ListenAddr    string   `yaml:"listen_addr"`
+	BridgeURL     string   `yaml:"bridge_url"`
+	WebhookSecret string   `yaml:"webhook_secret"`
+	AllowedIDs    []string `yaml:"allowed_ids"` // phone numbers (e.g. 905xxxxxxxxxx)
 }
 
 // SatelliteConfig holds satellite server settings.
