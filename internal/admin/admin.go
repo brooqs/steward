@@ -224,21 +224,28 @@ func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Content string `json:"content"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+	// Parse incoming JSON with only Settings-managed fields
+	var incoming map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Validate YAML
-	var test map[string]any
-	if err := yaml.Unmarshal([]byte(req.Content), &test); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Invalid YAML: %s", err)})
-		return
+	// Read existing config as raw YAML map (preserves all fields)
+	existing := make(map[string]any)
+	if data, err := os.ReadFile(s.configPath); err == nil {
+		yaml.Unmarshal(data, &existing)
+	}
+
+	// Only merge Settings-managed keys — never touch whatsapp, admin, telegram, etc.
+	settingsKeys := []string{
+		"provider", "api_key", "model", "base_url", "max_tokens",
+		"system_prompt", "memory", "shell",
+	}
+	for _, key := range settingsKeys {
+		if val, ok := incoming[key]; ok {
+			existing[key] = val
+		}
 	}
 
 	// Backup current config
@@ -247,19 +254,24 @@ func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
 		os.WriteFile(backup, data, 0o600)
 	}
 
-	// Write new config
-	if err := os.WriteFile(s.configPath, []byte(req.Content), 0o600); err != nil {
+	// Write merged config
+	yamlData, err := yaml.Marshal(existing)
+	if err != nil {
+		http.Error(w, "failed to serialize config", http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(s.configPath, yamlData, 0o600); err != nil {
 		http.Error(w, fmt.Sprintf("writing config: %s", err), http.StatusInternalServerError)
 		return
 	}
 
-	slog.Info("config updated via admin panel")
+	slog.Info("config updated via admin panel", "keys_updated", len(settingsKeys))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "saved",
-		"message": "Configuration saved. Restart Steward to apply changes.",
-		"backup":  backup,
+		"message": "Settings saved. Restart Steward to apply changes.",
 	})
 }
 
