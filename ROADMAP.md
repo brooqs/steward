@@ -51,3 +51,24 @@ Per-user memory, sessions, and permissions.
 - **Multi-language voice** — auto-detect language for STT/TTS
 - **Docker Compose one-liner** — Steward + WhatsApp bridge + Ollama
 - **iOS/Android companion app** — push notifications, quick actions
+
+## 🔮 Vision
+
+### AI-Driven NAS
+Turn Steward into an intelligent file/media server manager.
+
+- Smart file organization and search via natural language
+- Media library management (photos, videos, music)
+- Automated backups with AI-driven scheduling
+- Storage monitoring and alerts
+- "Find all photos from last summer" → semantic search
+
+### AI-Driven Home Security
+Network and home security powered by AI.
+
+- **Firewall management** — AI-assisted rule creation and anomaly detection
+- **DHCP/DNS management** — device tracking, custom DNS rules via chat
+- **Alien device scanner** — detect unknown devices on the network, alert via WhatsApp
+- **VPN management** — create/revoke WireGuard/OpenVPN profiles via chat
+- Intrusion detection with AI-powered log analysis
+- "Show me all devices on my network" → scan + classify + alert on unknowns
