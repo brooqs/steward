@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/brooqs/steward/internal/config"
 	"github.com/fsnotify/fsnotify"
 	"gopkg.in/yaml.v3"
 
@@ -157,6 +158,9 @@ func (l *Loader) loadIntegration(filename string) {
 		slog.Error("reading integration config", "file", filename, "error", err)
 		return
 	}
+
+	// Resolve ${ENV_VAR} references in integration configs
+	data = config.ResolveEnvVars(data)
 
 	var cfg map[string]any
 	if err := yaml.Unmarshal(data, &cfg); err != nil {

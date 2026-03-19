@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/brooqs/steward/internal/voice"
@@ -169,6 +170,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("reading config %s: %w", path, err)
 	}
 
+	// Resolve ${ENV_VAR} references before parsing
+	data = resolveEnvVars(data)
+
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
@@ -264,4 +268,26 @@ func (c *Config) resolvePaths(configDir string) {
 	}
 	c.Memory.DataDir = resolve(c.Memory.DataDir)
 	c.IntegrationsDir = resolve(c.IntegrationsDir)
+}
+
+// envVarPattern matches ${VAR_NAME} or $VAR_NAME patterns.
+var envVarPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// resolveEnvVars replaces ${ENV_VAR} references in raw config bytes
+// with their corresponding environment variable values.
+// If a referenced env var is not set, the placeholder is kept as-is.
+func resolveEnvVars(data []byte) []byte {
+	return envVarPattern.ReplaceAllFunc(data, func(match []byte) []byte {
+		// Extract var name from ${VAR_NAME}
+		varName := string(match[2 : len(match)-1])
+		if val, ok := os.LookupEnv(varName); ok {
+			return []byte(val)
+		}
+		return match // keep original if env var not set
+	})
+}
+
+// ResolveEnvVars is the exported version for use by integration loader.
+func ResolveEnvVars(data []byte) []byte {
+	return resolveEnvVars(data)
 }
