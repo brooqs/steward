@@ -244,7 +244,7 @@
         <span class="icon">🎵</span><span>Spotify</span>
       </div>
       <div class="nav-item" data-page="gmail">
-        <span class="icon">📧</span><span>Gmail</span>
+        <span class="icon">🌐</span><span>Google</span>
       </div>
     </aside>
 
@@ -389,15 +389,16 @@
         </div>
       </div>
 
-      <!-- Gmail Setup -->
+      <!-- Google Setup -->
       <div class="page" id="page-gmail">
-        <h2 class="page-title">📧 Gmail Setup</h2>
+        <h2 class="page-title">🌐 Google Setup</h2>
+        <p style="color:var(--muted);margin-bottom:16px">Connect Google to enable Gmail, Calendar, and Drive tools.</p>
         <div id="gmail-status-bar" style="padding:12px 16px;border-radius:8px;margin-bottom:20px;display:none"></div>
         <div class="editor-container">
           <div style="padding:20px">
             <div style="margin-bottom:20px">
               <div style="font-size:13px;color:var(--muted);margin-bottom:6px">1. Go to <a href="https://console.cloud.google.com" target="_blank" style="color:#4285f4">Google Cloud Console</a> → Create/select project</div>
-              <div style="font-size:13px;color:var(--muted);margin-bottom:6px">2. Enable <strong>Gmail API</strong>: APIs & Services → Library → Gmail API</div>
+              <div style="font-size:13px;color:var(--muted);margin-bottom:6px">2. Enable <strong>Gmail API</strong>, <strong>Calendar API</strong>, and <strong>Drive API</strong></div>
               <div style="font-size:13px;color:var(--muted);margin-bottom:6px">3. Create OAuth2 credentials: Credentials → Create → OAuth Client ID (Web)</div>
               <div style="font-size:13px;color:var(--muted);margin-bottom:12px">4. Add redirect URI: <code style="background:#333;padding:2px 6px;border-radius:4px">http://127.0.0.1:8888/callback</code></div>
             </div>
@@ -717,7 +718,7 @@
     async function loadGmailPage() {
       const bar = document.getElementById('gmail-status-bar');
       try {
-        const res = await fetch('/api/integrations?name=gmail', { credentials: 'same-origin' });
+        const res = await fetch('/api/integrations?name=google', { credentials: 'same-origin' });
         const data = await res.json();
         if (data.raw) {
           const lines = data.raw.split('\n');
@@ -730,11 +731,11 @@
               bar.style.display = 'block';
               bar.style.background = 'rgba(66,133,244,0.15)';
               bar.style.border = '1px solid #4285f4';
-              bar.innerHTML = '✅ <strong>Gmail connected!</strong> refresh_token is set.';
+              bar.innerHTML = '✅ <strong>Google connected!</strong> Gmail, Calendar & Drive active.';
             }
           });
         }
-      } catch (e) { /* gmail.yml doesn't exist yet */ }
+      } catch (e) { /* google.yml doesn't exist yet */ }
     }
 
     async function gmailSaveAndAuth() {
@@ -746,7 +747,7 @@
       try {
         const saveRes = await fetch('/api/integrations/save', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-          body: JSON.stringify({ name: 'gmail', content: yml })
+          body: JSON.stringify({ name: 'google', content: yml })
         });
         if (!saveRes.ok) { showToast('Failed to save config', 'error'); return; }
 
@@ -777,7 +778,7 @@
           bar.style.display = 'block';
           bar.style.background = 'rgba(66,133,244,0.15)';
           bar.style.border = '1px solid #4285f4';
-          bar.innerHTML = '✅ <strong>Gmail connected!</strong> Integration will hot-reload.';
+          bar.innerHTML = '✅ <strong>Google connected!</strong> Gmail, Calendar & Drive will hot-reload.';
           document.getElementById('gm-callback-url').value = '';
         } else {
           showToast(data.error || 'Exchange failed', 'error');

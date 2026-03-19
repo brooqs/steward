@@ -604,17 +604,17 @@ func (s *Server) handleSpotifyExchange(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Spotify connected! Integration will hot-reload."})
 }
 
-// ── Gmail OAuth2 ──────────────────────────────────────────────────
+// ── Google OAuth2 (Gmail + Calendar + Drive) ──────────────────────
 
 const (
-	gmailScopes      = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify"
-	gmailRedirectURI = "http://127.0.0.1:8888/callback"
+	googleScopes      = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive"
+	googleRedirectURI = "http://127.0.0.1:8888/callback"
 )
 
-func (s *Server) readGmailConfig() (map[string]any, error) {
-	data, err := os.ReadFile(filepath.Join(s.integrationsDir, "gmail.yml"))
+func (s *Server) readGoogleConfig() (map[string]any, error) {
+	data, err := os.ReadFile(filepath.Join(s.integrationsDir, "google.yml"))
 	if err != nil {
-		return nil, fmt.Errorf("gmail.yml not found \u2014 create it first via Add Integration")
+		return nil, fmt.Errorf("google.yml not found — create it first via Add Integration")
 	}
 	var cfg map[string]any
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
@@ -624,7 +624,7 @@ func (s *Server) readGmailConfig() (map[string]any, error) {
 }
 
 func (s *Server) handleGmailAuth(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.readGmailConfig()
+	cfg, err := s.readGoogleConfig()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -634,19 +634,19 @@ func (s *Server) handleGmailAuth(w http.ResponseWriter, r *http.Request) {
 	clientID, _ := cfg["client_id"].(string)
 	if clientID == "" {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"error": "client_id not set in gmail.yml"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "client_id not set in google.yml"})
 		return
 	}
 
 	authURL := fmt.Sprintf(
 		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&response_type=code&redirect_uri=%s&scope=%s&access_type=offline&prompt=consent",
 		clientID,
-		url.QueryEscape(gmailRedirectURI),
-		url.QueryEscape(gmailScopes),
+		url.QueryEscape(googleRedirectURI),
+		url.QueryEscape(googleScopes),
 	)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"url": authURL, "redirect_uri": gmailRedirectURI})
+	json.NewEncoder(w).Encode(map[string]string{"url": authURL, "redirect_uri": googleRedirectURI})
 }
 
 func (s *Server) handleGmailExchange(w http.ResponseWriter, r *http.Request) {
@@ -687,7 +687,7 @@ func (s *Server) handleGmailExchange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := s.readGmailConfig()
+	cfg, err := s.readGoogleConfig()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -702,12 +702,11 @@ func (s *Server) handleGmailExchange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Exchange code for tokens via Google
 	data := url.Values{
 		"code":          {code},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
-		"redirect_uri":  {gmailRedirectURI},
+		"redirect_uri":  {googleRedirectURI},
 		"grant_type":    {"authorization_code"},
 	}
 
@@ -744,14 +743,14 @@ func (s *Server) handleGmailExchange(w http.ResponseWriter, r *http.Request) {
 	cfg["enabled"] = true
 
 	yamlData, _ := yaml.Marshal(cfg)
-	gmailPath := filepath.Join(s.integrationsDir, "gmail.yml")
-	if err := os.WriteFile(gmailPath, yamlData, 0o644); err != nil {
+	googlePath := filepath.Join(s.integrationsDir, "google.yml")
+	if err := os.WriteFile(googlePath, yamlData, 0o644); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save: " + err.Error()})
 		return
 	}
 
-	slog.Info("gmail oauth2 completed", "refresh_token_length", len(tokenResp.RefreshToken))
+	slog.Info("google oauth2 completed", "refresh_token_length", len(tokenResp.RefreshToken))
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Gmail connected! Integration will hot-reload."})
+	json.NewEncoder(w).Encode(map[string]string{"message": "Google connected! Gmail, Calendar & Drive will hot-reload."})
 }
