@@ -30,6 +30,7 @@ import (
 	"github.com/brooqs/steward/internal/satellite"
 	"github.com/brooqs/steward/internal/scheduler"
 	"github.com/brooqs/steward/internal/tools"
+	"github.com/brooqs/steward/internal/tools/browse"
 	"github.com/brooqs/steward/internal/tools/shell"
 	"github.com/brooqs/steward/internal/voice"
 
@@ -106,6 +107,11 @@ func main() {
 	} else {
 		slog.Info("shell tool disabled (enable in config)")
 	}
+
+	// Register web browsing tools (always enabled)
+	wb := browse.New()
+	registry.RegisterAll(wb.GetTools())
+	slog.Info("web browsing tools enabled", "tools", 2)
 
 	// Initialize voice engine (STT/TTS)
 	var voiceEngine *voice.Engine
