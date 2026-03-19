@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -93,6 +94,62 @@ func (j *JFIntegration) GetTools() []tools.ToolSpec {
 			},
 			Handler: j.recentlyAdded,
 		},
+		{
+			Name:        "jellyfin_libraries",
+			Description: "List all media libraries (Movies, TV Shows, Music, etc.) in Jellyfin.",
+			Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
+			Handler:     j.libraries,
+		},
+		{
+			Name:        "jellyfin_item_details",
+			Description: "Get detailed information about a specific Jellyfin item (movie, episode, etc.).",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"item_id": map[string]any{"type": "string", "description": "Jellyfin item ID (from search results)"},
+				},
+				"required": []string{"item_id"},
+			},
+			Handler: j.itemDetails,
+		},
+		{
+			Name:        "jellyfin_play",
+			Description: "Start playing an item on a specific Jellyfin session/device.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{"type": "string", "description": "Target session ID (from jellyfin_sessions)"},
+					"item_id":    map[string]any{"type": "string", "description": "Item ID to play (from jellyfin_search)"},
+				},
+				"required": []string{"session_id", "item_id"},
+			},
+			Handler: j.play,
+		},
+		{
+			Name:        "jellyfin_playback_control",
+			Description: "Control playback on a Jellyfin session (pause, resume, stop, next, previous).",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{"type": "string", "description": "Target session ID"},
+					"command":    map[string]any{"type": "string", "description": "Command: PlayPause, Stop, NextTrack, PreviousTrack, Seek", "enum": []string{"PlayPause", "Stop", "NextTrack", "PreviousTrack"}},
+				},
+				"required": []string{"session_id", "command"},
+			},
+			Handler: j.playbackControl,
+		},
+		{
+			Name:        "jellyfin_stream_url",
+			Description: "Generate a direct stream URL for a Jellyfin item (useful for casting or external playback).",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"item_id": map[string]any{"type": "string", "description": "Jellyfin item ID to stream"},
+				},
+				"required": []string{"item_id"},
+			},
+			Handler: j.streamURL,
+		},
 	}
 }
 
@@ -177,6 +234,136 @@ func (j *JFIntegration) recentlyAdded(params map[string]any) (any, error) {
 	return result, nil
 }
 
+func (j *JFIntegration) libraries(params map[string]any) (any, error) {
+	data, err := j.apiGet("/Library/VirtualFolders", nil)
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+	var folders []map[string]any
+	json.Unmarshal(data, &folders)
+	var result []map[string]any
+	for _, f := range folders {
+		result = append(result, map[string]any{
+			"name":          f["Name"],
+			"collection_type": f["CollectionType"],
+			"item_id":       f["ItemId"],
+		})
+	}
+	return map[string]any{"libraries": result}, nil
+}
+
+func (j *JFIntegration) itemDetails(params map[string]any) (any, error) {
+	itemID, _ := params["item_id"].(string)
+	if itemID == "" {
+		return nil, fmt.Errorf("item_id required")
+	}
+	qp := url.Values{"Fields": {"Overview,People,Genres,CommunityRating,OfficialRating,RunTimeTicks,MediaStreams"}}
+	data, err := j.apiGet("/Items/"+itemID, qp)
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+	var item map[string]any
+	json.Unmarshal(data, &item)
+
+	// Extract people (actors, directors)
+	var actors, directors []string
+	if people, ok := item["People"].([]any); ok {
+		for _, p := range people {
+			person, _ := p.(map[string]any)
+			name, _ := person["Name"].(string)
+			role, _ := person["Type"].(string)
+			if role == "Director" {
+				directors = append(directors, name)
+			} else if role == "Actor" && len(actors) < 5 {
+				actors = append(actors, name)
+			}
+		}
+	}
+
+	// Extract genres
+	var genres []string
+	if g, ok := item["Genres"].([]any); ok {
+		for _, genre := range g {
+			if s, ok := genre.(string); ok {
+				genres = append(genres, s)
+			}
+		}
+	}
+
+	overview, _ := item["Overview"].(string)
+	if len(overview) > 300 {
+		overview = overview[:300] + "..."
+	}
+
+	// Runtime in minutes
+	var runtimeMin int
+	if ticks, ok := item["RunTimeTicks"].(float64); ok {
+		runtimeMin = int(ticks / 10_000_000 / 60)
+	}
+
+	return map[string]any{
+		"name":       item["Name"],
+		"type":       item["Type"],
+		"year":       item["ProductionYear"],
+		"overview":   overview,
+		"rating":     item["CommunityRating"],
+		"mpaa":       item["OfficialRating"],
+		"runtime":    fmt.Sprintf("%dmin", runtimeMin),
+		"genres":     genres,
+		"directors":  directors,
+		"actors":     actors,
+		"id":         item["Id"],
+	}, nil
+}
+
+func (j *JFIntegration) play(params map[string]any) (any, error) {
+	sessionID, _ := params["session_id"].(string)
+	itemID, _ := params["item_id"].(string)
+	if sessionID == "" || itemID == "" {
+		return nil, fmt.Errorf("session_id and item_id required")
+	}
+	path := fmt.Sprintf("/Sessions/%s/Playing", sessionID)
+	qp := url.Values{"ItemIds": {itemID}, "PlayCommand": {"PlayNow"}}
+	_, err := j.apiPost(path, qp, nil)
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+	return map[string]any{"status": "playing", "session_id": sessionID, "item_id": itemID}, nil
+}
+
+func (j *JFIntegration) playbackControl(params map[string]any) (any, error) {
+	sessionID, _ := params["session_id"].(string)
+	command, _ := params["command"].(string)
+	if sessionID == "" || command == "" {
+		return nil, fmt.Errorf("session_id and command required")
+	}
+	path := fmt.Sprintf("/Sessions/%s/Playing/%s", sessionID, command)
+	_, err := j.apiPost(path, nil, nil)
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+	return map[string]any{"status": command, "session_id": sessionID}, nil
+}
+
+func (j *JFIntegration) streamURL(params map[string]any) (any, error) {
+	itemID, _ := params["item_id"].(string)
+	if itemID == "" {
+		return nil, fmt.Errorf("item_id required")
+	}
+	// Generate direct stream URL with API key
+	streamURL := fmt.Sprintf("%s/Items/%s/Download?api_key=%s", j.url, itemID, j.apiKey)
+	// Also provide a transcoded stream for wider compatibility
+	transcodeURL := fmt.Sprintf("%s/Videos/%s/stream?Static=true&api_key=%s", j.url, itemID, j.apiKey)
+
+	return map[string]any{
+		"stream_url":    streamURL,
+		"transcode_url": transcodeURL,
+		"item_id":       itemID,
+	}, nil
+}
+
+// ── HTTP Helpers ──────────────────────────────────────────────
+
 func (j *JFIntegration) apiGet(path string, params url.Values) ([]byte, error) {
 	u := j.url + path
 	if params == nil {
@@ -186,6 +373,36 @@ func (j *JFIntegration) apiGet(path string, params url.Values) ([]byte, error) {
 	u += "?" + params.Encode()
 
 	resp, err := j.client.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return body, nil
+}
+
+func (j *JFIntegration) apiPost(path string, params url.Values, data []byte) ([]byte, error) {
+	u := j.url + path
+	if params == nil {
+		params = url.Values{}
+	}
+	params.Set("api_key", j.apiKey)
+	u += "?" + params.Encode()
+
+	var bodyReader io.Reader
+	if data != nil {
+		bodyReader = bytes.NewReader(data)
+	}
+	req, err := http.NewRequest("POST", u, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := j.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
