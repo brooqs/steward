@@ -58,6 +58,13 @@ func (s *Steward) buildSystemPrompt() string {
 	var sb strings.Builder
 	sb.WriteString(s.sysPrompt)
 
+	// Inject current date/time so the LLM knows "today"
+	now := time.Now()
+	zone, _ := now.Zone()
+	sb.WriteString(fmt.Sprintf("\n\nCurrent date and time: %s, %02d %s %d, %02d:%02d (%s)",
+		now.Weekday(), now.Day(), now.Month(), now.Year(),
+		now.Hour(), now.Minute(), zone))
+
 	// Get all tool schemas for names + descriptions
 	schemas := s.registry.GetSchemas()
 	if len(schemas) == 0 {
