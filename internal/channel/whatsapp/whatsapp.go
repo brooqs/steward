@@ -142,7 +142,7 @@ func (ch *Channel) processVoiceAndReply(sender, audioB64, mimetype string) {
 
 	// Check if STT is available
 	if ch.voiceEngine == nil || !ch.voiceEngine.HasSTT() {
-		ch.sendReply(sender, "Sesli mesaj desteği aktif değil. Lütfen yazılı mesaj gönderin.")
+		ch.SendReply(sender, "Sesli mesaj desteği aktif değil. Lütfen yazılı mesaj gönderin.")
 		return
 	}
 
@@ -150,7 +150,7 @@ func (ch *Channel) processVoiceAndReply(sender, audioB64, mimetype string) {
 	audioData, err := base64.StdEncoding.DecodeString(audioB64)
 	if err != nil {
 		slog.Error("voice decode error", "error", err)
-		ch.sendReply(sender, "Sesli mesaj okunamadı.")
+		ch.SendReply(sender, "Sesli mesaj okunamadı.")
 		return
 	}
 
@@ -168,13 +168,13 @@ func (ch *Channel) processVoiceAndReply(sender, audioB64, mimetype string) {
 	text, err := ch.voiceEngine.Transcribe(ctx, audioData, format)
 	if err != nil {
 		slog.Error("STT error", "error", err)
-		ch.sendReply(sender, "Sesli mesaj anlaşılamadı, tekrar deneyin.")
+		ch.SendReply(sender, "Sesli mesaj anlaşılamadı, tekrar deneyin.")
 		return
 	}
 
 	text = strings.TrimSpace(text)
 	if text == "" {
-		ch.sendReply(sender, "Sesli mesajda konuşma algılanamadı.")
+		ch.SendReply(sender, "Sesli mesajda konuşma algılanamadı.")
 		return
 	}
 
@@ -195,10 +195,10 @@ func (ch *Channel) processAndReply(sender, text string) {
 		response = "Sorry, something went wrong. Please try again."
 	}
 
-	ch.sendReply(sender, response)
+	ch.SendReply(sender, response)
 }
 
-func (ch *Channel) sendReply(to, message string) {
+func (ch *Channel) SendReply(to, message string) {
 	payload := map[string]string{"to": to, "message": message}
 	data, _ := json.Marshal(payload)
 

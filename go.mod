@@ -6,8 +6,10 @@ require (
 	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.11.2
+	github.com/robfig/cron/v3 v3.0.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 

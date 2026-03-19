@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 	"github.com/brooqs/steward/internal/memory"
 	"github.com/brooqs/steward/internal/provider"
 	"github.com/brooqs/steward/internal/satellite"
+	"github.com/brooqs/steward/internal/scheduler"
 	"github.com/brooqs/steward/internal/tools"
 	"github.com/brooqs/steward/internal/tools/shell"
 	"github.com/brooqs/steward/internal/voice"
@@ -230,6 +233,29 @@ func main() {
 			slog.Error("failed to create whatsapp channel", "error", err)
 			os.Exit(1)
 		}
+
+		// Start scheduler with WhatsApp as notification channel
+		schedSavePath := filepath.Join(filepath.Dir(cfg.IntegrationsDir), "scheduler.json")
+		sched := scheduler.New(scheduler.Config{
+			SavePath: schedSavePath,
+			ChatFn:   steward.Chat,
+			NotifyFn: func(channel, message string) error {
+				// Parse channel format: "whatsapp:905xxxxxxxxxx"
+				parts := strings.SplitN(channel, ":", 2)
+				if len(parts) != 2 || parts[0] != "whatsapp" {
+					return fmt.Errorf("unsupported channel: %s", channel)
+				}
+				ch.SendReply(parts[1], message)
+				return nil
+			},
+		})
+		registry.RegisterAll(sched.GetTools())
+		if err := sched.Start(); err != nil {
+			slog.Warn("scheduler start error", "error", err)
+		}
+		defer sched.Stop()
+		slog.Info("scheduler enabled", "save_path", schedSavePath)
+
 		if err := ch.Run(ctx); err != nil {
 			slog.Error("whatsapp channel error", "error", err)
 			os.Exit(1)
