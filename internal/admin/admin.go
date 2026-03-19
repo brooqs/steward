@@ -241,6 +241,7 @@ func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
 	settingsKeys := []string{
 		"provider", "api_key", "model", "base_url", "max_tokens",
 		"system_prompt", "memory", "shell",
+		"telegram", "whatsapp",
 	}
 	for _, key := range settingsKeys {
 		if val, ok := incoming[key]; ok {

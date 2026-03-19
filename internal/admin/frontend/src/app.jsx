@@ -7,6 +7,7 @@ import { Integrations } from './pages/Integrations';
 import { Spotify } from './pages/Spotify';
 import { Google } from './pages/Google';
 import { Policies } from './pages/Policies';
+import { Channels } from './pages/Channels';
 import { Cron } from './pages/Cron';
 import { Logs } from './pages/Logs';
 
@@ -19,6 +20,7 @@ export function App() {
           <Router>
             <Dashboard path="/" />
             <Settings path="/settings" />
+            <Channels path="/channels" />
             <Integrations path="/integrations" />
             <Spotify path="/spotify" />
             <Google path="/google" />

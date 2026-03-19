@@ -6,6 +6,7 @@ const navItems = [
   { path: '/', icon: '📊', label: 'Dashboard' },
   { section: 'Configuration' },
   { path: '/settings', icon: '⚙️', label: 'Settings' },
+  { path: '/channels', icon: '💬', label: 'Channels' },
   { path: '/integrations', icon: '🔌', label: 'Integrations' },
   { path: '/policies', icon: '🛡️', label: 'Policies' },
   { section: 'Services' },
