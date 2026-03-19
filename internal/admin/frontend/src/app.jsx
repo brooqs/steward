@@ -1,5 +1,5 @@
 import Router from 'preact-router';
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import { Sidebar } from './components/Sidebar';
 import { ToastProvider } from './components/Toast';
 import { Dashboard } from './pages/Dashboard';
@@ -11,6 +11,7 @@ import { Policies } from './pages/Policies';
 import { Channels } from './pages/Channels';
 import { Cron } from './pages/Cron';
 import { Logs } from './pages/Logs';
+import { Setup } from './pages/Setup';
 
 function RestartButton() {
   const [restarting, setRestarting] = useState(false);
@@ -21,7 +22,6 @@ function RestartButton() {
     try {
       await fetch('/api/restart', { method: 'POST' });
     } catch {}
-    // Poll until service is back
     const poll = setInterval(async () => {
       try {
         const res = await fetch('/api/status');
@@ -59,6 +59,28 @@ function RestartButton() {
 }
 
 export function App() {
+  const [setupMode, setSetupMode] = useState(null); // null = loading, true/false
+
+  useEffect(() => {
+    fetch('/api/status')
+      .then(r => r.json())
+      .then(data => setSetupMode(data.setup_mode === true))
+      .catch(() => setSetupMode(false));
+  }, []);
+
+  // Loading
+  if (setupMode === null) return null;
+
+  // Setup mode — show wizard only, no sidebar
+  if (setupMode) {
+    return (
+      <ToastProvider>
+        <Setup />
+      </ToastProvider>
+    );
+  }
+
+  // Normal mode
   return (
     <ToastProvider>
       <div class="layout">

@@ -72,8 +72,41 @@ func main() {
 	// Load config
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
+		// If config doesn't exist, create a minimal one and enter setup
+		if os.IsNotExist(err) {
+			cfg = &config.Config{}
+		} else {
+			slog.Error("failed to load config", "error", err)
+			os.Exit(1)
+		}
+	}
+
+	// Setup mode: if no API key, run only the admin panel with onboarding wizard
+	if cfg.APIKey == "" {
+		slog.Info("no API key configured — entering setup mode", "config", *configPath)
+
+		setupCtx, setupCancel := context.WithCancel(context.Background())
+		defer setupCancel()
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			<-sigCh
+			setupCancel()
+		}()
+
+		adminCfg := admin.Config{
+			Enabled:    true,
+			ListenAddr: "0.0.0.0:8080",
+			SetupMode:  true,
+		}
+		adminServer := admin.NewServer(adminCfg, *configPath, "", nil, nil)
+		slog.Info("🚀 setup wizard available at http://0.0.0.0:8080")
+		if err := adminServer.Run(setupCtx); err != nil && err != http.ErrServerClosed {
+			slog.Error("setup server error", "error", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// Create LLM provider

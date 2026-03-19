@@ -33,6 +33,7 @@ type Config struct {
 	Username   string `yaml:"username"`    // basic auth
 	Password   string `yaml:"password"`    // basic auth
 	BridgeURL  string `yaml:"bridge_url"`  // WhatsApp bridge URL (e.g., http://127.0.0.1:3000)
+	SetupMode  bool   // true when running first-time setup (no auth required)
 }
 
 // StatusProvider gives the admin panel access to runtime state.
@@ -115,6 +116,11 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/restart", s.requireAuth(s.handleRestart))
 	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
+	// Setup endpoint (no auth in setup mode)
+	if s.cfg.SetupMode {
+		mux.HandleFunc("/api/setup", s.handleSetup)
+	}
+
 	// Serve Preact SPA (embedded)
 	distFS, err := fs.Sub(staticFiles, "dist")
 	if err != nil {
@@ -148,6 +154,11 @@ func (s *Server) Run(ctx context.Context) error {
 
 func (s *Server) requireAuth(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// No auth in setup mode
+		if s.cfg.SetupMode {
+			handler(w, r)
+			return
+		}
 		if s.cfg.Username != "" {
 			user, pass, ok := r.BasicAuth()
 			if !ok || user != s.cfg.Username || pass != s.cfg.Password {
@@ -162,6 +173,11 @@ func (s *Server) requireAuth(handler http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) requireAuthHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// No auth in setup mode
+		if s.cfg.SetupMode {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if s.cfg.Username != "" {
 			user, pass, ok := r.BasicAuth()
 			if !ok || user != s.cfg.Username || pass != s.cfg.Password {
@@ -175,6 +191,17 @@ func (s *Server) requireAuthHandler(next http.Handler) http.Handler {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// In setup mode, return minimal status
+	if s.cfg.SetupMode {
+		json.NewEncoder(w).Encode(map[string]any{
+			"setup_mode": true,
+			"version":    "setup",
+		})
+		return
+	}
+
 	s.status.mu.RLock()
 	defer s.status.mu.RUnlock()
 
@@ -294,6 +321,112 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "restarting"})
 
 	// Exit after response is sent — systemd will restart us
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	}()
+}
+
+func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var setup struct {
+		Username     string `json:"username"`
+		Password     string `json:"password"`
+		Provider     string `json:"provider"`
+		APIKey       string `json:"api_key"`
+		Model        string `json:"model"`
+		SystemPrompt string `json:"system_prompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&setup); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	if setup.Username == "" || setup.Password == "" || setup.Provider == "" || setup.APIKey == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "username, password, provider and api_key are required"})
+		return
+	}
+
+	if setup.Model == "" {
+		// Set sensible defaults
+		switch setup.Provider {
+		case "claude":
+			setup.Model = "claude-sonnet-4-5-20241022"
+		case "openai":
+			setup.Model = "gpt-4o"
+		case "groq":
+			setup.Model = "llama-3.3-70b-versatile"
+		case "gemini":
+			setup.Model = "gemini-2.0-flash"
+		case "ollama":
+			setup.Model = "llama3.2"
+		case "openrouter":
+			setup.Model = "anthropic/claude-sonnet-4-5"
+		}
+	}
+
+	if setup.SystemPrompt == "" {
+		setup.SystemPrompt = "You are Steward, a helpful AI personal assistant.\nYou have access to smart home controls, media, downloads, and system management tools.\nBe concise, accurate, and friendly. When using tools, explain what you did."
+	}
+
+	// Build config map
+	cfg := map[string]any{
+		"provider":      setup.Provider,
+		"api_key":       setup.APIKey,
+		"model":         setup.Model,
+		"max_tokens":    4096,
+		"system_prompt": setup.SystemPrompt,
+		"admin": map[string]any{
+			"enabled":     true,
+			"listen_addr": "0.0.0.0:8080",
+			"username":    setup.Username,
+			"password":    setup.Password,
+		},
+		"memory": map[string]any{
+			"backend":          "badger",
+			"data_dir":         "/var/lib/steward/badger",
+			"short_term_limit": 10,
+		},
+		"shell": map[string]any{
+			"enabled":          false,
+			"timeout":          30,
+			"max_output_bytes": 65536,
+			"blocked_commands": []string{"rm -rf /", "rm -rf /*", "mkfs", "dd", "shutdown", "reboot"},
+		},
+		"integrations_dir": "/etc/steward/integrations",
+	}
+
+	yamlData, err := yaml.Marshal(cfg)
+	if err != nil {
+		http.Error(w, "failed to serialize config", http.StatusInternalServerError)
+		return
+	}
+
+	// Ensure config directory exists
+	configDir := filepath.Dir(s.configPath)
+	os.MkdirAll(configDir, 0o755)
+
+	if err := os.WriteFile(s.configPath, yamlData, 0o600); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to write config: " + err.Error()})
+		return
+	}
+
+	// Create integrations directory
+	os.MkdirAll(filepath.Join(configDir, "integrations"), 0o755)
+
+	slog.Info("initial setup completed", "provider", setup.Provider, "config", s.configPath)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "Setup complete! Steward is restarting..."})
+
+	// Exit for systemd restart — will come back in normal mode
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		os.Exit(0)
