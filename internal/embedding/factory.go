@@ -21,6 +21,9 @@ func New(cfg config.EmbeddingConfig) (Embedder, error) {
 		}
 		return NewONNXEmbedder(modelPath)
 
+	case "huggingface", "hf":
+		return NewHuggingFaceEmbedder(cfg.APIKey, cfg.Model), nil
+
 	case "openai":
 		if cfg.APIKey == "" {
 			return nil, fmt.Errorf("openai embedder requires api_key")

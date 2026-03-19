@@ -114,6 +114,8 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/cron/jobs", s.requireAuth(s.handleCronJobs))
 	mux.HandleFunc("/api/cron/delete", s.requireAuth(s.handleCronDelete))
 	mux.HandleFunc("/api/restart", s.requireAuth(s.handleRestart))
+	mux.HandleFunc("/api/embedding/status", s.requireAuth(s.handleEmbeddingStatus))
+	mux.HandleFunc("/api/embedding/setup", s.requireAuth(s.handleEmbeddingSetup))
 	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
 	// Setup endpoint (no auth in setup mode)
