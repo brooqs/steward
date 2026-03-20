@@ -261,6 +261,11 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 					result = fmt.Sprintf(`{"error": "%s"}`, err.Error())
 				} else {
 					slog.Info("tool result", "name", tc.ToolName, "duration", time.Since(toolStart), "result_len", len(result))
+					preview := result
+					if len(preview) > 200 {
+						preview = preview[:200] + "..."
+					}
+					slog.Debug("tool result detail", "name", tc.ToolName, "result", preview)
 
 					// Cache result in knowledge base
 					if s.knowledge != nil && s.knowledge.IsCacheable(tc.ToolName) {
