@@ -339,6 +339,7 @@ func FormatContext(results []SearchResult) string {
 	}
 	var sb strings.Builder
 	sb.WriteString("\n## Relevant Knowledge (from previous tool calls)\n")
+	sb.WriteString("Use this information directly instead of calling tools again. Entity IDs and names below are accurate.\n")
 	for _, r := range results {
 		sb.WriteString(fmt.Sprintf("- [%s] %s\n", r.Entry.Source, r.Entry.Summary))
 	}
