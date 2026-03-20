@@ -95,6 +95,18 @@ func (h *HAIntegration) GetTools() []tools.ToolSpec {
 			},
 			Handler: h.listEntities,
 		},
+		{
+			Name:        "ha_sync_entities",
+			Description: "Fetch ALL Home Assistant entities with full attributes (color modes, capabilities, friendly names). Use this to learn about available devices and their capabilities. Results are automatically cached for future use.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"domain": map[string]any{"type": "string", "description": "Filter by domain (e.g. 'light'). Leave empty for all."},
+				},
+				"required": []string{},
+			},
+			Handler: h.syncEntities,
+		},
 	}
 }
 
@@ -167,6 +179,63 @@ func (h *HAIntegration) listEntities(params map[string]any) (any, error) {
 		}
 	}
 	return result, nil
+}
+
+func (h *HAIntegration) syncEntities(params map[string]any) (any, error) {
+	domain, _ := params["domain"].(string)
+	data, err := h.apiGet("/api/states")
+	if err != nil {
+		return map[string]any{"error": err.Error()}, nil
+	}
+	var states []map[string]any
+	json.Unmarshal(data, &states)
+
+	var result []map[string]any
+	for _, s := range states {
+		eid, _ := s["entity_id"].(string)
+		if domain != "" && !strings.HasPrefix(eid, domain+".") {
+			continue
+		}
+		attrs, _ := s["attributes"].(map[string]any)
+		fname, _ := attrs["friendly_name"].(string)
+
+		entry := map[string]any{
+			"entity_id":     eid,
+			"state":         s["state"],
+			"friendly_name": fname,
+		}
+
+		// Include important attributes for device control
+		if colorModes, ok := attrs["supported_color_modes"]; ok {
+			entry["supported_color_modes"] = colorModes
+		}
+		if brightness, ok := attrs["brightness"]; ok {
+			entry["brightness"] = brightness
+		}
+		if minTemp, ok := attrs["min_temp"]; ok {
+			entry["min_temp"] = minTemp
+		}
+		if maxTemp, ok := attrs["max_temp"]; ok {
+			entry["max_temp"] = maxTemp
+		}
+		if features, ok := attrs["supported_features"]; ok {
+			entry["supported_features"] = features
+		}
+		if deviceClass, ok := attrs["device_class"]; ok {
+			entry["device_class"] = deviceClass
+		}
+		if unitOfMeasure, ok := attrs["unit_of_measurement"]; ok {
+			entry["unit_of_measurement"] = unitOfMeasure
+		}
+
+		result = append(result, entry)
+	}
+
+	return map[string]any{
+		"total_entities": len(result),
+		"entities":       result,
+		"message":        fmt.Sprintf("Synced %d entities with full attributes. This data is now cached for future use.", len(result)),
+	}, nil
 }
 
 func (h *HAIntegration) apiGet(path string) ([]byte, error) {

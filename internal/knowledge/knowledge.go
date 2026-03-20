@@ -66,6 +66,11 @@ func DefaultCacheConfigs() map[string]CacheConfig {
 			Exportable: false,
 			Summarizer: summarizeHAEntities,
 		},
+		"ha_sync_entities": {
+			TTL:        24 * time.Hour,
+			Exportable: false,
+			Summarizer: summarizeHASyncEntities,
+		},
 		"ha_get_entity_state": {
 			TTL:        5 * time.Minute,
 			Exportable: false,
@@ -365,6 +370,37 @@ func summarizeHAEntities(result string) string {
 				parts = append(parts, fmt.Sprintf("%s: %s", eid, state))
 			}
 		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+func summarizeHASyncEntities(result string) string {
+	var data map[string]any
+	if err := json.Unmarshal([]byte(result), &data); err != nil {
+		return result
+	}
+	entities, _ := data["entities"].([]any)
+	var parts []string
+	for _, raw := range entities {
+		e, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		eid, _ := e["entity_id"].(string)
+		fname, _ := e["friendly_name"].(string)
+		state, _ := e["state"].(string)
+		if eid == "" {
+			continue
+		}
+		desc := fmt.Sprintf("%s (%s): %s", eid, fname, state)
+		// Add color modes if present
+		if modes, ok := e["supported_color_modes"]; ok {
+			desc += fmt.Sprintf(" [color_modes: %v]", modes)
+		}
+		if dc, ok := e["device_class"].(string); ok && dc != "" {
+			desc += fmt.Sprintf(" [class: %s]", dc)
+		}
+		parts = append(parts, desc)
 	}
 	return strings.Join(parts, "; ")
 }
