@@ -7,21 +7,23 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Model files to download from HuggingFace
+// Model files to download for local embedding
 var modelFiles = []struct {
 	Name string
 	URL  string
 	Size string
 }{
-	{"model.onnx", "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx", "~22MB"},
-	{"tokenizer.json", "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json", "~700KB"},
+	{"all-MiniLM-L6-v2.Q8_0.gguf", "https://huggingface.co/second-state/All-MiniLM-L6-v2-Embedding-GGUF/resolve/main/all-MiniLM-L6-v2-Q8_0.gguf", "~24MB"},
+	{"llama-server", "https://github.com/ggml-org/llama.cpp/releases/download/b5170/llama-server-x86_64-linux-gnu.tar.gz", "~3MB"},
 }
 
 var downloadMu sync.Mutex
@@ -31,8 +33,8 @@ func (s *Server) handleEmbeddingStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	modelsDir := "/var/lib/steward/models"
-	modelExists := fileExists(filepath.Join(modelsDir, "model.onnx"))
-	tokenizerExists := fileExists(filepath.Join(modelsDir, "tokenizer.json"))
+	modelExists := fileExists(filepath.Join(modelsDir, "all-MiniLM-L6-v2.Q8_0.gguf"))
+	serverExists := fileExists(filepath.Join(modelsDir, "llama-server"))
 
 	// Check if embedding is enabled in config
 	cfg, _ := s.readConfigFile()
@@ -56,7 +58,7 @@ func (s *Server) handleEmbeddingStatus(w http.ResponseWriter, r *http.Request) {
 	downloadMu.Unlock()
 
 	json.NewEncoder(w).Encode(map[string]any{
-		"model_downloaded":   modelExists && tokenizerExists,
+		"model_downloaded":   modelExists && serverExists,
 		"model_path":         modelsDir,
 		"embedding_enabled":  embeddingEnabled,
 		"embedding_provider": embeddingProvider,
@@ -72,7 +74,7 @@ func (s *Server) handleEmbeddingSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Action   string `json:"action"` // "download" | "enable" | "enable_hf"
+		Action   string `json:"action"` // "download" | "enable" | "enable_hf" | "enable_local"
 		Provider string `json:"provider"`
 	}
 	json.NewDecoder(r.Body).Decode(&payload)
@@ -81,7 +83,22 @@ func (s *Server) handleEmbeddingSetup(w http.ResponseWriter, r *http.Request) {
 	case "download":
 		go downloadModel()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "downloading", "message": "Model download started..."})
+		json.NewEncoder(w).Encode(map[string]string{"status": "downloading", "message": "Downloading llama-server + embedding model..."})
+
+	case "enable_local":
+		// Enable local llama.cpp embedding (requires downloaded files)
+		if err := s.enableEmbedding("llamacpp", "/var/lib/steward/models"); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "Local embedding enabled! Restarting..."})
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			os.Exit(0)
+		}()
 
 	case "enable_hf":
 		// Enable HuggingFace Inference API (no download needed)
@@ -101,11 +118,13 @@ func (s *Server) handleEmbeddingSetup(w http.ResponseWriter, r *http.Request) {
 	case "enable":
 		provider := payload.Provider
 		if provider == "" {
-			provider = "huggingface"
+			provider = "llamacpp"
 		}
-		model := "sentence-transformers/all-MiniLM-L6-v2"
+		model := "/var/lib/steward/models"
 		if provider == "ollama" {
 			model = "nomic-embed-text"
+		} else if provider == "huggingface" {
+			model = "sentence-transformers/all-MiniLM-L6-v2"
 		}
 		if err := s.enableEmbedding(provider, model); err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -186,19 +205,32 @@ func downloadModel() {
 
 	for i, mf := range modelFiles {
 		downloadMu.Lock()
-		downloadProgress = fmt.Sprintf("downloading %s (%d/%d)", mf.Name, i+1, len(modelFiles))
+		downloadProgress = fmt.Sprintf("downloading %s (%d/%d) %s", mf.Name, i+1, len(modelFiles), mf.Size)
 		downloadMu.Unlock()
 
 		slog.Info("downloading model file", "name", mf.Name, "url", mf.URL)
 
 		destPath := filepath.Join(modelsDir, mf.Name)
-		if err := downloadFile(destPath, mf.URL); err != nil {
-			slog.Error("model download failed", "file", mf.Name, "error", err)
-			downloadMu.Lock()
-			downloadProgress = "error: " + err.Error()
-			downloadMu.Unlock()
-			time.Sleep(5 * time.Second)
-			return
+
+		if strings.HasSuffix(mf.URL, ".tar.gz") {
+			// Download and extract tar.gz
+			if err := downloadAndExtract(destPath, mf.URL, mf.Name); err != nil {
+				slog.Error("model download failed", "file", mf.Name, "error", err)
+				downloadMu.Lock()
+				downloadProgress = "error: " + err.Error()
+				downloadMu.Unlock()
+				time.Sleep(5 * time.Second)
+				return
+			}
+		} else {
+			if err := downloadFile(destPath, mf.URL); err != nil {
+				slog.Error("model download failed", "file", mf.Name, "error", err)
+				downloadMu.Lock()
+				downloadProgress = "error: " + err.Error()
+				downloadMu.Unlock()
+				time.Sleep(5 * time.Second)
+				return
+			}
 		}
 	}
 
@@ -207,6 +239,41 @@ func downloadModel() {
 	downloadMu.Unlock()
 	slog.Info("model download complete", "dir", modelsDir)
 	time.Sleep(2 * time.Second)
+}
+
+func downloadAndExtract(destPath, url, targetName string) error {
+	// Download the tar.gz to a temp file
+	tmpFile := destPath + ".tar.gz"
+	if err := downloadFile(tmpFile, url); err != nil {
+		return err
+	}
+	defer os.Remove(tmpFile)
+
+	// Extract the target file using tar command
+	destDir := filepath.Dir(destPath)
+	cmd := exec.Command("tar", "xzf", tmpFile, "-C", destDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("extracting %s: %s: %w", targetName, string(out), err)
+	}
+
+	// The extracted binary might be in a subdirectory, find it
+	// Try common patterns
+	candidates := []string{
+		filepath.Join(destDir, targetName),
+		filepath.Join(destDir, "build", "bin", targetName),
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			if c != destPath {
+				os.Rename(c, destPath)
+			}
+			break
+		}
+	}
+
+	// Make executable
+	os.Chmod(destPath, 0o755)
+	return nil
 }
 
 func downloadFile(dest, url string) error {

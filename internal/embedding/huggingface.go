@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	hfInferenceURL = "https://api-inference.huggingface.co/pipeline/feature-extraction/"
+	hfInferenceURL = "https://router.huggingface.co/pipeline/feature-extraction/"
 	hfDefaultModel = "sentence-transformers/all-MiniLM-L6-v2"
 	hfDimensions   = 384
 )

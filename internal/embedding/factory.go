@@ -14,12 +14,12 @@ func New(cfg config.EmbeddingConfig) (Embedder, error) {
 	}
 
 	switch strings.ToLower(cfg.Provider) {
-	case "local", "onnx":
-		modelPath := cfg.Model
-		if modelPath == "" {
-			modelPath = "models/all-MiniLM-L6-v2.onnx"
+	case "local", "onnx", "llamacpp":
+		modelsDir := cfg.Model
+		if modelsDir == "" {
+			modelsDir = "/var/lib/steward/models"
 		}
-		return NewONNXEmbedder(modelPath)
+		return NewLlamaCppEmbedder(modelsDir)
 
 	case "huggingface", "hf":
 		return NewHuggingFaceEmbedder(cfg.APIKey, cfg.Model), nil
