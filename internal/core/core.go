@@ -230,22 +230,20 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 			MaxTokens:    s.maxTokens,
 		}
 
+		slog.Info("llm request", "tools", len(req.Tools), "messages", len(req.Messages), "sys_prompt_len", len(sysPrompt))
+
 		resp, err := s.provider.ChatCompletion(ctx, req)
 		if err != nil {
 			return "", fmt.Errorf("provider call %d: %w", i+1, err)
 		}
 
-		// End turn — return text
-		if resp.StopReason == "end_turn" || resp.StopReason == "" {
-			text := resp.ExtractText()
-			if text == "" {
-				text = "(no response)"
-			}
-			return text, nil
-		}
+		// Log LLM response details
+		toolCalls := resp.ToolCalls()
+		slog.Info("llm response", "provider", s.provider.Name(), "stop_reason", resp.StopReason, "tool_calls", len(toolCalls))
 
 		// Tool use — dispatch tools and continue
-		if resp.StopReason == "tool_use" {
+		// Check BOTH stop_reason AND actual presence of tool calls in content
+		if resp.StopReason == "tool_use" || len(toolCalls) > 0 {
 			// Add assistant response to messages
 			currentMessages = append(currentMessages, provider.Message{
 				Role:    "assistant",
@@ -253,7 +251,6 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 			})
 
 			// Dispatch each tool call
-			toolCalls := resp.ToolCalls()
 			var toolResults []provider.ContentBlock
 
 			for _, tc := range toolCalls {
