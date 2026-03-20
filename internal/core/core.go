@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brooqs/steward/internal/knowledge"
 	"github.com/brooqs/steward/internal/memory"
 	"github.com/brooqs/steward/internal/provider"
 	"github.com/brooqs/steward/internal/tools"
@@ -23,6 +24,7 @@ type Steward struct {
 	provider     provider.Provider
 	registry     *tools.Registry
 	toolSelector *tools.ToolSelector
+	knowledge    *knowledge.Store
 	memory       memory.Store
 	model        string
 	maxTokens    int
@@ -35,6 +37,7 @@ type Config struct {
 	Provider     provider.Provider
 	Registry     *tools.Registry
 	ToolSelector *tools.ToolSelector
+	Knowledge    *knowledge.Store
 	Memory       memory.Store
 	Model        string
 	MaxTokens    int
@@ -48,6 +51,7 @@ func New(cfg Config) *Steward {
 		provider:     cfg.Provider,
 		registry:     cfg.Registry,
 		toolSelector: cfg.ToolSelector,
+		knowledge:    cfg.Knowledge,
 		memory:       cfg.Memory,
 		model:        cfg.Model,
 		maxTokens:    cfg.MaxTokens,
@@ -200,9 +204,19 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 			toolSchemas = s.registry.GetSchemas()
 		}
 
+		// Query knowledge base for relevant context
+		sysPrompt := s.buildSystemPrompt()
+		if s.knowledge != nil && i == 0 {
+			results, err := s.knowledge.Query(ctx, userMessage, 3)
+			if err == nil && len(results) > 0 {
+				sysPrompt += knowledge.FormatContext(results)
+				slog.Info("knowledge context injected", "results", len(results))
+			}
+		}
+
 		req := &provider.Request{
 			Model:        s.model,
-			SystemPrompt: s.buildSystemPrompt(),
+			SystemPrompt: sysPrompt,
 			Messages:     currentMessages,
 			Tools:        toolSchemas,
 			MaxTokens:    s.maxTokens,
@@ -247,6 +261,18 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 					result = fmt.Sprintf(`{"error": "%s"}`, err.Error())
 				} else {
 					slog.Info("tool result", "name", tc.ToolName, "duration", time.Since(toolStart), "result_len", len(result))
+
+					// Cache result in knowledge base
+					if s.knowledge != nil && s.knowledge.IsCacheable(tc.ToolName) {
+						inputKey := fmt.Sprintf("%v", tc.ToolInput)
+						go func(name, key, res string) {
+							if err := s.knowledge.StoreResult(context.Background(), name, key, res); err != nil {
+								slog.Warn("knowledge cache failed", "tool", name, "error", err)
+							} else {
+								slog.Debug("knowledge cached", "tool", name)
+							}
+						}(tc.ToolName, inputKey, result)
+					}
 				}
 
 				toolResults = append(toolResults, provider.ContentBlock{

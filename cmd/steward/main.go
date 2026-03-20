@@ -26,6 +26,7 @@ import (
 	"github.com/brooqs/steward/internal/core"
 	"github.com/brooqs/steward/internal/embedding"
 	"github.com/brooqs/steward/internal/integration"
+	"github.com/brooqs/steward/internal/knowledge"
 	"github.com/brooqs/steward/internal/memory"
 	"github.com/brooqs/steward/internal/provider"
 	"github.com/brooqs/steward/internal/satellite"
@@ -174,11 +175,21 @@ func main() {
 	// Create tool selector
 	toolSelector := tools.NewToolSelector(registry, embedder, 10)
 
+	// Create knowledge store (reuse BadgerDB for tool result caching)
+	var kb *knowledge.Store
+	if embedder != nil {
+		if bs, ok := store.(*memory.BadgerStore); ok {
+			kb = knowledge.NewStore(bs.DB(), embedder)
+			slog.Info("knowledge store ready", "entries", kb.Count())
+		}
+	}
+
 	// Create the agent
 	steward := core.New(core.Config{
 		Provider:     llm,
 		Registry:     registry,
 		ToolSelector: toolSelector,
+		Knowledge:    kb,
 		Memory:       store,
 		Model:        cfg.Model,
 		MaxTokens:    cfg.MaxTokens,

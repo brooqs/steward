@@ -150,6 +150,11 @@ func (b *BadgerStore) Close() error {
 	return b.db.Close()
 }
 
+// DB returns the underlying BadgerDB instance for sharing with other stores.
+func (b *BadgerStore) DB() *badger.DB {
+	return b.db
+}
+
 // msgKey generates a BadgerDB key for a message.
 // Format: msg:{session_id}:{timestamp_ns}
 func msgKey(sessionID string, t time.Time) []byte {
