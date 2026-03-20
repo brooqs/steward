@@ -343,8 +343,8 @@ func FormatContext(results []SearchResult) string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("\n## Relevant Knowledge (from previous tool calls)\n")
-	sb.WriteString("Use this information directly instead of calling tools again. Entity IDs and names below are accurate.\n")
+	sb.WriteString("\n## Relevant Knowledge (cached entity data)\n")
+	sb.WriteString("You already know these entities from previous lookups. Use the entity IDs below directly — do NOT call ha_list_entities or ha_sync_entities again. You MUST still call ha_call_service to perform any action.\n")
 	for _, r := range results {
 		sb.WriteString(fmt.Sprintf("- [%s] %s\n", r.Entry.Source, r.Entry.Summary))
 	}
