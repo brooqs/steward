@@ -137,6 +137,10 @@ func (h *HAIntegration) callService(params map[string]any) (any, error) {
 	}
 	body := map[string]any{}
 	if eid, ok := params["entity_id"].(string); ok && eid != "" {
+		// Auto-prefix: if entity_id has no dot, prepend domain (e.g. "wled" → "light.wled")
+		if !strings.Contains(eid, ".") && domain != "" {
+			eid = domain + "." + eid
+		}
 		body["entity_id"] = eid
 	}
 	if extra, ok := params["extra"].(map[string]any); ok {
