@@ -10,7 +10,7 @@ import (
 	"github.com/brooqs/steward/internal/provider"
 )
 
-const defaultTopK = 10
+const defaultTopK = 15
 
 // toolEmbedding stores a tool's precomputed embedding vector.
 type toolEmbedding struct {
@@ -43,9 +43,10 @@ func NewToolSelector(registry *Registry, embedder embedding.Embedder, topK int) 
 		embedder:  embedder,
 		topK:      topK,
 		pinnedSet: map[string]bool{
-			"shell_exec":  true,
-			"web_fetch":   true,
-			"web_search":  true,
+			"shell_exec":      true,
+			"web_fetch":       true,
+			"web_search":      true,
+			"ha_call_service": true,
 		},
 	}
 }
@@ -165,15 +166,18 @@ func (ts *ToolSelector) SelectTools(ctx context.Context, userMessage string, pin
 
 	// Convert to slice
 	result := make([]provider.ToolSchema, 0, len(selected))
-	for _, schema := range selected {
+	selectedNames := make([]string, 0, len(selected))
+	for name, schema := range selected {
 		result = append(result, schema)
+		selectedNames = append(selectedNames, name)
 	}
 
-	slog.Debug("tool selection",
-		"query_preview", truncateStr(userMessage, 60),
+	slog.Info("tool selection",
+		"query", truncateStr(userMessage, 60),
 		"selected", len(result),
 		"total", len(index),
 		"top_score", scores[0].score,
+		"tools", selectedNames,
 	)
 
 	return result

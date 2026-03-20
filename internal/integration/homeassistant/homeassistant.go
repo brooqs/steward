@@ -70,14 +70,14 @@ func (h *HAIntegration) GetTools() []tools.ToolSpec {
 		},
 		{
 			Name:        "ha_call_service",
-			Description: "Call a Home Assistant service (turn on/off lights, switches, climate, etc.)",
+			Description: "Call a Home Assistant service to control devices — turn on/off lights, change color (RGB/HS), set brightness, adjust temperature, toggle switches, run scripts, control WLED",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"domain":    map[string]any{"type": "string", "description": "Service domain: light, switch, climate, script"},
+					"domain":    map[string]any{"type": "string", "description": "Service domain: light, switch, climate, script, media_player"},
 					"service":   map[string]any{"type": "string", "description": "Service name: turn_on, turn_off, toggle"},
-					"entity_id": map[string]any{"type": "string", "description": "Target entity ID"},
-					"extra":     map[string]any{"type": "object", "description": "Additional service data (brightness, temperature)"},
+					"entity_id": map[string]any{"type": "string", "description": "Target entity ID, e.g. light.wled"},
+					"extra":     map[string]any{"type": "object", "description": "Additional service data: rgb_color, hs_color, brightness, color_temp, temperature"},
 				},
 				"required": []string{"domain", "service"},
 			},
