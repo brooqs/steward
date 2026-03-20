@@ -173,14 +173,18 @@ func (s *Steward) Chat(ctx context.Context, sessionID, userMessage string) (stri
 	}
 
 	// 4. Run the agent turn (may loop for tool calls)
-	responseText, err := s.runTurn(ctx, userMessage, messages)
+	responseText, toolAnnotation, err := s.runTurn(ctx, userMessage, messages)
 	if err != nil {
 		slog.Error("chat failed", "session", sessionID, "duration", time.Since(start), "error", err)
 		return "", fmt.Errorf("agent turn failed: %w", err)
 	}
 
-	// 5. Persist assistant response
-	if err := s.memory.SaveMessage(sessionID, "assistant", responseText); err != nil {
+	// 5. Persist assistant response (with tool call annotations for context)
+	savedText := responseText
+	if toolAnnotation != "" {
+		savedText = toolAnnotation + responseText
+	}
+	if err := s.memory.SaveMessage(sessionID, "assistant", savedText); err != nil {
 		slog.Error("failed to save assistant message", "session", sessionID, "error", err)
 	}
 
@@ -196,12 +200,13 @@ func (s *Steward) Chat(ctx context.Context, sessionID, userMessage string) (stri
 
 // runTurn executes one or more LLM API calls, handling tool_use blocks
 // until a final text response is reached.
-func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []provider.Message) (string, error) {
+func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []provider.Message) (string, string, error) {
 	currentMessages := make([]provider.Message, len(messages))
 	copy(currentMessages, messages)
 
 	// Track tools used in this turn for pinning
 	var usedTools []string
+	var toolSummary string // track tool calls for memory annotation
 
 	for i := 0; i < maxToolIterations; i++ {
 		// Dynamic tool selection: pick most relevant tools for this message
@@ -234,7 +239,7 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 
 		resp, err := s.provider.ChatCompletion(ctx, req)
 		if err != nil {
-			return "", fmt.Errorf("provider call %d: %w", i+1, err)
+			return "", toolSummary, fmt.Errorf("provider call %d: %w", i+1, err)
 		}
 
 		// Log LLM response details
@@ -259,6 +264,7 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 
 				// Track used tools for pinning in next iteration
 				usedTools = append(usedTools, tc.ToolName)
+				toolSummary += fmt.Sprintf("[Used tool: %s] ", tc.ToolName)
 
 				result, err := s.registry.Dispatch(tc.ToolName, tc.ToolInput)
 				if err != nil {
@@ -307,10 +313,10 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 		if text == "" {
 			text = fmt.Sprintf("(unexpected stop reason: %s)", resp.StopReason)
 		}
-		return text, nil
+		return text, toolSummary, nil
 	}
 
-	return "I reached the tool-call limit. Please try a simpler request.", nil
+	return "I reached the tool-call limit. Please try a simpler request.", toolSummary, nil
 }
 
 // Registry returns the tool registry for external registration.
