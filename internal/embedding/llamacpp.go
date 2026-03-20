@@ -71,6 +71,7 @@ func (e *LlamaCppEmbedder) start() error {
 		return nil
 	}
 
+	modelsDir := filepath.Dir(e.modelPath)
 	e.cmd = exec.Command(e.serverBin,
 		"--model", e.modelPath,
 		"--port", fmt.Sprintf("%d", e.port),
@@ -79,6 +80,8 @@ func (e *LlamaCppEmbedder) start() error {
 		"--threads", "2",
 		"--log-disable",
 	)
+	// Set LD_LIBRARY_PATH so llama-server can find libllama.so etc.
+	e.cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+modelsDir)
 	e.cmd.Stdout = nil
 	e.cmd.Stderr = nil
 
@@ -162,17 +165,44 @@ func (e *LlamaCppEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]
 		return nil, fmt.Errorf("llama-server error %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Response format: [{"embedding": [0.1, 0.2, ...]}, ...]
-	var results []struct {
+	// Response format: [{"index": 0, "embedding": [[0.1, 0.2, ...]]}]
+	// Note: embedding can be nested array [[...]] for sentence-level models
+	var rawResponse []byte
+	rawResponse, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading embedding response: %w", err)
+	}
+
+	// Try nested format first: [{"embedding": [[float, ...]]}]
+	var nestedResults []struct {
+		Embedding [][]float64 `json:"embedding"`
+	}
+	if err := json.Unmarshal(rawResponse, &nestedResults); err == nil && len(nestedResults) > 0 && len(nestedResults[0].Embedding) > 0 {
+		vectors := make([][]float32, len(nestedResults))
+		for i, r := range nestedResults {
+			if len(r.Embedding) == 0 {
+				continue
+			}
+			// Use first (and usually only) embedding row
+			vec := r.Embedding[0]
+			vectors[i] = make([]float32, len(vec))
+			for j, v := range vec {
+				vectors[i][j] = float32(v)
+			}
+		}
+		return vectors, nil
+	}
+
+	// Fallback: flat format [{"embedding": [float, ...]}]
+	var flatResults []struct {
 		Embedding []float64 `json:"embedding"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+	if err := json.Unmarshal(rawResponse, &flatResults); err != nil {
 		return nil, fmt.Errorf("decoding embedding response: %w", err)
 	}
 
-	// Convert float64 → float32
-	vectors := make([][]float32, len(results))
-	for i, r := range results {
+	vectors := make([][]float32, len(flatResults))
+	for i, r := range flatResults {
 		vectors[i] = make([]float32, len(r.Embedding))
 		for j, v := range r.Embedding {
 			vectors[i][j] = float32(v)
