@@ -4,7 +4,6 @@
 set -euo pipefail
 
 VERSION="${1:-latest}"
-INSTALL_DIR="/usr/local/bin"
 
 echo "🤖 Installing Steward..."
 
@@ -18,11 +17,13 @@ case "$ARCH" in
   *)       echo "❌ Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
-# Set OS-specific paths
+# Set OS-specific paths — macOS uses user-space paths (no root needed)
 if [ "$OS" = "darwin" ]; then
+  INSTALL_DIR="$HOME/.local/bin"
   CONFIG_DIR="$HOME/.config/steward"
   DATA_DIR="$HOME/.local/share/steward"
 else
+  INSTALL_DIR="/usr/local/bin"
   CONFIG_DIR="/etc/steward"
   DATA_DIR="/var/lib/steward"
 fi
@@ -45,15 +46,31 @@ tar xzf "$TMP/steward.tar.gz" -C "$TMP"
 
 # Install binaries
 if [ "$OS" = "darwin" ]; then
-  # macOS: /usr/local/bin may not exist on fresh installs
-  sudo mkdir -p "$INSTALL_DIR"
-  sudo cp -f "$TMP/steward" "$INSTALL_DIR/steward"
-  sudo chmod 755 "$INSTALL_DIR/steward"
+  # macOS: fully user-space — no sudo required
+  mkdir -p "$INSTALL_DIR"
+  cp -f "$TMP/steward" "$INSTALL_DIR/steward"
+  chmod 755 "$INSTALL_DIR/steward"
   if [ -f "$TMP/steward-satellite" ]; then
-    sudo cp -f "$TMP/steward-satellite" "$INSTALL_DIR/steward-satellite"
-    sudo chmod 755 "$INSTALL_DIR/steward-satellite"
+    cp -f "$TMP/steward-satellite" "$INSTALL_DIR/steward-satellite"
+    chmod 755 "$INSTALL_DIR/steward-satellite"
+  fi
+
+  # Add ~/.local/bin to PATH if not already there
+  if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+    SHELL_NAME=$(basename "$SHELL")
+    case "$SHELL_NAME" in
+      zsh)  RC_FILE="$HOME/.zshrc" ;;
+      bash) RC_FILE="$HOME/.bashrc" ;;
+      *)    RC_FILE="$HOME/.profile" ;;
+    esac
+    if ! grep -q '.local/bin' "$RC_FILE" 2>/dev/null; then
+      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$RC_FILE"
+      echo "  ℹ️  Added ~/.local/bin to PATH in $RC_FILE"
+    fi
+    export PATH="$INSTALL_DIR:$PATH"
   fi
 else
+  # Linux: system-wide install
   sudo install -m 755 "$TMP/steward" "$INSTALL_DIR/steward"
   sudo install -m 755 "$TMP/steward-satellite" "$INSTALL_DIR/steward-satellite" 2>/dev/null || true
 fi
@@ -75,7 +92,7 @@ echo "  ✅ Data directory created at $DATA_DIR"
 
 # OS-specific service setup
 if [ "$OS" = "darwin" ]; then
-  # macOS: create launchd plist
+  # macOS: create launchd plist (user-space, no root)
   PLIST_DIR="$HOME/Library/LaunchAgents"
   PLIST_FILE="$PLIST_DIR/com.brooqs.steward.plist"
   mkdir -p "$PLIST_DIR"
@@ -134,20 +151,19 @@ echo "🎉 Steward installed! Next steps:"
 echo ""
 
 if [ "$OS" = "darwin" ]; then
-  echo "  1. Configure: cp $CONFIG_DIR/core.yml.example $CONFIG_DIR/core.yml"
-  echo "                nano $CONFIG_DIR/core.yml"
+  echo "  1. Start:     steward -config $CONFIG_DIR/core.yml"
   echo ""
-  echo "  2. Start:     launchctl load $PLIST_FILE"
-  echo "                — or run directly: steward -config $CONFIG_DIR/core.yml"
+  echo "  2. Setup:     Open http://localhost:8080 in your browser"
   echo ""
-  echo "  3. Logs:      tail -f $DATA_DIR/steward.log"
+  echo "  3. Service:   launchctl load $PLIST_FILE"
   echo ""
-  echo "  4. Stop:      launchctl unload $PLIST_FILE"
+  echo "  4. Logs:      tail -f $DATA_DIR/steward.log"
+  echo ""
+  echo "  💡 No root required — everything runs in your home directory!"
 else
-  echo "  1. Configure: sudo cp $CONFIG_DIR/core.yml.example $CONFIG_DIR/core.yml"
-  echo "                sudo nano $CONFIG_DIR/core.yml"
+  echo "  1. Start:     sudo systemctl enable --now steward"
   echo ""
-  echo "  2. Start:     sudo systemctl enable --now steward"
+  echo "  2. Setup:     Open http://localhost:8080 in your browser"
   echo ""
   echo "  3. Logs:      journalctl -u steward -f"
 fi
