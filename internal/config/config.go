@@ -243,10 +243,8 @@ func (c *Config) validate() error {
 		return fmt.Errorf("unknown provider %q, must be one of: claude, openai, groq, gemini, ollama, openrouter, llamacpp", c.Provider)
 	}
 
-	// ollama and llamacpp don't require api_key
-	if c.APIKey == "" && c.Provider != "ollama" && c.Provider != "llamacpp" {
-		return fmt.Errorf("api_key is required for provider %q (set in config or STEWARD_API_KEY env)", c.Provider)
-	}
+	// api_key check removed — setup mode in main.go handles empty api_key
+	// by launching the onboarding wizard instead of crashing
 
 	validBackends := map[string]bool{"badger": true, "postgres": true}
 	if !validBackends[c.Memory.Backend] {
