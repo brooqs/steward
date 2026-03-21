@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"runtime"
@@ -117,6 +118,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/restart", s.requireAuth(s.handleRestart))
 	mux.HandleFunc("/api/embedding/status", s.requireAuth(s.handleEmbeddingStatus))
 	mux.HandleFunc("/api/embedding/setup", s.requireAuth(s.handleEmbeddingSetup))
+	mux.HandleFunc("/api/whatsapp/bridge/service", s.requireAuth(s.handleBridgeService))
 	mux.HandleFunc("/api/whatsapp/", s.requireAuth(s.handleBridgeProxy))
 
 	// Setup endpoint (no auth in setup mode)
@@ -500,6 +502,148 @@ func (s *Server) handleBridgeProxy(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
+
+// handleBridgeService manages the WhatsApp bridge as a launchd service (macOS).
+func (s *Server) handleBridgeService(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	plistPath := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.brooqs.steward-bridge.plist")
+
+	if r.Method == "GET" {
+		// Check if service is running
+		running := false
+		if _, err := os.Stat(plistPath); err == nil {
+			out, _ := exec.Command("launchctl", "list", "com.brooqs.steward-bridge").Output()
+			running = len(out) > 0
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"installed": fileExists(plistPath),
+			"running":   running,
+		})
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"` // start, stop
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	switch req.Action {
+	case "start":
+		// Find node binary
+		nodePath := findBinary("node", []string{"/opt/homebrew/bin/node", "/usr/local/bin/node"})
+		if nodePath == "" {
+			json.NewEncoder(w).Encode(map[string]any{"error": "Node.js not found — install with: brew install node"})
+			return
+		}
+
+		// Find bridge index.js
+		bridgePath := findBridgePath()
+		if bridgePath == "" {
+			json.NewEncoder(w).Encode(map[string]any{"error": "Bridge not found — reinstall with: brew reinstall steward"})
+			return
+		}
+
+		// Create launchd plist
+		logDir := "/opt/homebrew/var/log"
+		if _, err := os.Stat(logDir); os.IsNotExist(err) {
+			logDir = filepath.Join(os.Getenv("HOME"), ".local", "share", "steward")
+		}
+
+		plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.brooqs.steward-bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>%s</string>
+    <string>%s</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>%s/steward-bridge.log</string>
+  <key>StandardErrorPath</key>
+  <string>%s/steward-bridge.err</string>
+</dict>
+</plist>`, nodePath, bridgePath, logDir, logDir)
+
+		os.MkdirAll(filepath.Dir(plistPath), 0o755)
+		if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
+			json.NewEncoder(w).Encode(map[string]any{"error": "Failed to write plist: " + err.Error()})
+			return
+		}
+
+		// Load the service
+		exec.Command("launchctl", "unload", plistPath).Run() // unload first if exists
+		if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
+			json.NewEncoder(w).Encode(map[string]any{"error": "Failed to start service: " + err.Error()})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{"message": "WhatsApp bridge service started!", "status": "running"})
+
+	case "stop":
+		if _, err := os.Stat(plistPath); os.IsNotExist(err) {
+			json.NewEncoder(w).Encode(map[string]any{"message": "Service not installed"})
+			return
+		}
+		exec.Command("launchctl", "unload", plistPath).Run()
+		os.Remove(plistPath)
+		json.NewEncoder(w).Encode(map[string]any{"message": "WhatsApp bridge service stopped and removed"})
+
+	default:
+		json.NewEncoder(w).Encode(map[string]any{"error": "unknown action — use 'start' or 'stop'"})
+	}
+}
+
+func findBinary(name string, candidates []string) string {
+	// Try PATH first
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
+func findBridgePath() string {
+	candidates := []string{}
+	// Check brew cellar
+	if out, err := exec.Command("/opt/homebrew/bin/brew", "--prefix", "steward").Output(); err == nil {
+		candidates = append(candidates, strings.TrimSpace(string(out))+"/libexec/bridge/whatsapp/index.js")
+	}
+	// Common install paths
+	home := os.Getenv("HOME")
+	candidates = append(candidates,
+		"/opt/homebrew/Cellar/steward/*/libexec/bridge/whatsapp/index.js",
+		filepath.Join(home, ".local", "share", "steward", "whatsapp-bridge", "index.js"),
+	)
+	for _, c := range candidates {
+		if strings.Contains(c, "*") {
+			matches, _ := filepath.Glob(c)
+			if len(matches) > 0 {
+				return matches[len(matches)-1]
+			}
+		} else if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
 
 func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 	// GET ?name=xxx → return specific integration config

@@ -13,21 +13,36 @@ function WhatsAppBridge({ toast }) {
   const [bridgeStatus, setBridgeStatus] = useState(null);
   const [qrUrl, setQrUrl] = useState(null);
   const [bridgeError, setBridgeError] = useState(false);
+  const [serviceStatus, setServiceStatus] = useState(null);
+  const [serviceLoading, setServiceLoading] = useState(false);
   const intervalRef = useRef(null);
 
   const pollBridge = async () => {
+    // Check service status
+    try {
+      const svcRes = await fetch('/api/whatsapp/bridge/service');
+      const svcData = await svcRes.json();
+      setServiceStatus(svcData);
+    } catch {}
+
+    // Check bridge health
     try {
       const res = await fetch('/api/whatsapp/health');
       const data = await res.json();
+
+      if (data.error) {
+        setBridgeError(true);
+        setBridgeStatus(null);
+        return;
+      }
+
       setBridgeStatus(data);
       setBridgeError(false);
 
-      // If QR is available, fetch QR data
       if (data.status === 'qr') {
         const qrRes = await fetch('/api/whatsapp/qr');
         const qrData = await qrRes.json();
         if (qrData.available && qrData.data) {
-          // Generate QR code image URL via Google Charts API (simple, no dependency)
           setQrUrl(`https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(qrData.data)}`);
         }
       } else {
@@ -56,18 +71,59 @@ function WhatsAppBridge({ toast }) {
     }
   };
 
+  const handleService = async (action) => {
+    setServiceLoading(true);
+    try {
+      const res = await fetch('/api/whatsapp/bridge/service', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        toast(data.error, 'error');
+      } else {
+        toast(data.message, 'success');
+      }
+      setTimeout(pollBridge, 2000);
+    } catch {
+      toast('Service action failed', 'error');
+    }
+    setServiceLoading(false);
+  };
+
   const statusInfo = bridgeStatus ? (STATUS_LABELS[bridgeStatus.status] || STATUS_LABELS.disconnected) : null;
 
   return (
     <div class="card">
-      <div class="card-title">WhatsApp Bridge Status</div>
+      <div class="card-title">WhatsApp Bridge</div>
 
       {bridgeError ? (
         <div style="padding: 16px; text-align: center;">
-          <p style="color: var(--error); font-size: 14px; margin-bottom: 8px;">⚠️ Bridge unreachable</p>
-          <p style="font-size: 12px; color: var(--text-muted);">
-            Make sure the WhatsApp bridge is running. Check with: <code>systemctl status whatsapp-bridge</code>
+          <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 12px;">
+            WhatsApp bridge is not running.
           </p>
+          {serviceStatus && !serviceStatus.running ? (
+            <button class="btn btn-primary" onClick={() => handleService('start')} disabled={serviceLoading}
+              style="display: inline-flex; align-items: center; gap: 8px;">
+              {serviceLoading ? '⏳ Starting...' : '🚀 Initialize WhatsApp Service'}
+            </button>
+          ) : serviceStatus && serviceStatus.running ? (
+            <div>
+              <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">
+                Service is starting up — waiting for bridge to respond...
+              </p>
+              <button class="btn btn-outline" onClick={() => handleService('stop')} disabled={serviceLoading}
+                style="font-size: 12px; border-color: var(--error); color: var(--error);">
+                Stop Service
+              </button>
+            </div>
+          ) : (
+            <button class="btn btn-primary" onClick={() => handleService('start')} disabled={serviceLoading}
+              style="display: inline-flex; align-items: center; gap: 8px;">
+              {serviceLoading ? '⏳ Starting...' : '🚀 Initialize WhatsApp Service'}
+            </button>
+          )}
         </div>
       ) : bridgeStatus ? (
         <div>
@@ -88,7 +144,6 @@ function WhatsAppBridge({ toast }) {
             )}
           </div>
 
-          {/* QR Code Display */}
           {bridgeStatus.status === 'qr' && qrUrl && (
             <div style="text-align: center; padding: 20px; background: white; border-radius: var(--radius-sm); margin-bottom: 16px;">
               <img src={qrUrl} alt="WhatsApp QR Code" style="width: 280px; height: 280px;" />
@@ -98,11 +153,19 @@ function WhatsAppBridge({ toast }) {
             </div>
           )}
 
-          {bridgeStatus.status === 'ready' && (
-            <button class="btn btn-outline" style="border-color: var(--error); color: var(--error);" onClick={handleLogout}>
-              🔌 Disconnect Session
-            </button>
-          )}
+          <div style="display: flex; gap: 8px;">
+            {bridgeStatus.status === 'ready' && (
+              <button class="btn btn-outline" style="border-color: var(--error); color: var(--error);" onClick={handleLogout}>
+                🔌 Disconnect Session
+              </button>
+            )}
+            {serviceStatus && serviceStatus.running && (
+              <button class="btn btn-outline" onClick={() => handleService('stop')} disabled={serviceLoading}
+                style="font-size: 12px;">
+                ⏹ Stop Service
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <p style="color: var(--text-muted);">Loading bridge status...</p>
