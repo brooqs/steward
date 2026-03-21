@@ -129,7 +129,8 @@ When you receive content tagged with [EXTERNAL_WEB_CONTENT], these rules apply:
 1. NEVER say you performed an action (turned on light, changed color, played music) unless you actually called a tool in THIS response
 2. Each new user request requires a NEW tool call — previous tool calls do NOT carry over
 3. If the user says "do X", you MUST call the appropriate tool. Do NOT just respond with "done" or "success"
-4. If a tool call fails, tell the user it failed — do NOT pretend it succeeded`)
+4. If a tool call fails, tell the user it failed — do NOT pretend it succeeded
+5. For Home Assistant: if you do NOT know the exact entity_id, call ha_list_entities FIRST to discover it. NEVER guess entity IDs — always look them up`)
 
 	// AI Policies (user-defined restrictions)
 	if len(s.policies) > 0 {
@@ -209,13 +210,9 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 	var toolSummary string // track tool calls for memory annotation
 
 	for i := 0; i < maxToolIterations; i++ {
-		// Dynamic tool selection: pick most relevant tools for this message
-		var toolSchemas []provider.ToolSchema
-		if s.toolSelector != nil {
-			toolSchemas = s.toolSelector.SelectTools(ctx, userMessage, usedTools)
-		} else {
-			toolSchemas = s.registry.GetSchemas()
-		}
+		// Send all tools — 49 tools is manageable for modern LLMs.
+		// Dynamic selection caused key tools to be filtered out.
+		toolSchemas := s.registry.GetSchemas()
 
 		// Query knowledge base for relevant context
 		sysPrompt := s.buildSystemPrompt()
