@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const pino = require('pino');
@@ -29,11 +29,23 @@ let state = {
 };
 
 let sock = null;
+let reconnectAttempt = 0;
 
 async function startConnection() {
   const { state: authState, saveCreds } = await useMultiFileAuthState(DATA_DIR);
 
+  // Fetch latest WhatsApp version to avoid 405 errors
+  let version;
+  try {
+    const latest = await fetchLatestBaileysVersion();
+    version = latest.version;
+    console.log('📋 WhatsApp version:', version.join('.'));
+  } catch (err) {
+    console.warn('⚠️  Could not fetch latest version, using default');
+  }
+
   sock = makeWASocket({
+    version,
     auth: authState,
     printQRInTerminal: false,
     logger: pino({ level: 'silent' }),
@@ -58,6 +70,7 @@ async function startConnection() {
       state.status = 'ready';
       state.qrData = null;
       state.connectedAt = new Date().toISOString();
+      reconnectAttempt = 0;
       console.log('✅ WhatsApp connected!');
     }
 
@@ -69,7 +82,10 @@ async function startConnection() {
       console.log('❌ Disconnected:', statusCode, shouldReconnect ? '— reconnecting...' : '— logged out');
 
       if (shouldReconnect) {
-        setTimeout(startConnection, 3000);
+        reconnectAttempt++;
+        const delay = Math.min(3000 * reconnectAttempt, 30000);
+        console.log('   Retry in ' + (delay / 1000) + 's (attempt ' + reconnectAttempt + ')');
+        setTimeout(startConnection, delay);
       } else {
         state.connectedAt = null;
       }
