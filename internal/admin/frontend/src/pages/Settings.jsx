@@ -86,7 +86,7 @@ export function Settings() {
   useEffect(() => {
     fetch('/api/config')
       .then(r => r.json())
-      .then(data => { setConfig(data); setLoading(false); })
+      .then(data => { setConfig(data.config || data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
