@@ -116,12 +116,11 @@ brews:
 
       # Create data directory
       (var/"lib/steward").mkpath
-    service do
+    service: |
       run [opt_bin/"steward", "-config", etc/"steward/core.yml"]
       keep_alive true
       log_path var/"log/steward.log"
       error_log_path var/"log/steward.err"
-    end
     caveats: |
       To get started:
         1. cp #{etc}/steward/core.yml.example #{etc}/steward/core.yml
