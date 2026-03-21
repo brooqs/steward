@@ -446,10 +446,26 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 // handleBridgeProxy forwards requests to the WhatsApp bridge.
 func (s *Server) handleBridgeProxy(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.BridgeURL == "" {
+	bridgeURL := s.cfg.BridgeURL
+
+	// If not set in admin config, try reading from config file (whatsapp.bridge_url)
+	if bridgeURL == "" {
+		if data, err := os.ReadFile(s.configPath); err == nil {
+			var cfg map[string]any
+			if err := yaml.Unmarshal(data, &cfg); err == nil {
+				if wa, ok := cfg["whatsapp"].(map[string]any); ok {
+					if u, ok := wa["bridge_url"].(string); ok && u != "" {
+						bridgeURL = u
+					}
+				}
+			}
+		}
+	}
+
+	if bridgeURL == "" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"error": "bridge_url not configured in admin config",
+			"error": "bridge_url not configured — set it in Channels page",
 		})
 		return
 	}
@@ -459,7 +475,7 @@ func (s *Server) handleBridgeProxy(w http.ResponseWriter, r *http.Request) {
 	if bridgePath == "" {
 		bridgePath = "/"
 	}
-	targetURL := strings.TrimRight(s.cfg.BridgeURL, "/") + bridgePath
+	targetURL := strings.TrimRight(bridgeURL, "/") + bridgePath
 
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, r.Body)
 	if err != nil {
