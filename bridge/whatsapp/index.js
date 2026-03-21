@@ -31,6 +31,9 @@ let state = {
 let sock = null;
 let reconnectAttempt = 0;
 
+// LID → phone number mapping
+const lidToPhone = new Map();
+
 async function startConnection() {
   const { state: authState, saveCreds } = await useMultiFileAuthState(DATA_DIR);
 
@@ -54,6 +57,27 @@ async function startConnection() {
 
   // Save credentials on update
   sock.ev.on('creds.update', saveCreds);
+
+  // Build LID ↔ phone mapping from contacts
+  sock.ev.on('contacts.upsert', (contacts) => {
+    for (const c of contacts) {
+      if (c.id && c.lid) {
+        const phone = c.id.replace(/@.*/, '');
+        const lid = c.lid.replace(/@.*/, '');
+        lidToPhone.set(lid, phone);
+        console.log('📇 Contact mapped: LID ' + lid + ' → ' + phone);
+      }
+    }
+  });
+  sock.ev.on('contacts.update', (contacts) => {
+    for (const c of contacts) {
+      if (c.id && c.lid) {
+        const phone = c.id.replace(/@.*/, '');
+        const lid = c.lid.replace(/@.*/, '');
+        lidToPhone.set(lid, phone);
+      }
+    }
+  });
 
   // Connection updates
   sock.ev.on('connection.update', (update) => {
@@ -102,8 +126,13 @@ async function startConnection() {
       const from = msg.key.remoteJid;
       state.messageCount++;
 
-      // Extract phone number from JID (e.g. 905xxxxxxxxxx@s.whatsapp.net)
-      const phone = from.replace(/@.*/, '');
+      // Extract phone number — resolve LID to real phone if possible
+      const rawId = from.replace(/@.*/, '');
+      const isLid = from.endsWith('@lid');
+      const phone = isLid ? (lidToPhone.get(rawId) || rawId) : rawId;
+      if (isLid && !lidToPhone.has(rawId)) {
+        console.log('⚠️  Unknown LID: ' + rawId + ' — add to allow list or map contact');
+      }
 
       try {
         const headers = { 'Content-Type': 'application/json' };
