@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"runtime"
 	"sync"
 	"time"
 
@@ -377,6 +378,14 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		setup.SystemPrompt = "You are Steward, a helpful AI personal assistant.\nYou have access to smart home controls, media, downloads, and system management tools.\nBe concise, accurate, and friendly. When using tools, explain what you did."
 	}
 
+	// Detect OS-appropriate paths
+	dataDir := "/var/lib/steward/badger"
+	integrationsDir := filepath.Join(filepath.Dir(s.configPath), "integrations")
+	if runtime.GOOS == "darwin" {
+		home, _ := os.UserHomeDir()
+		dataDir = filepath.Join(home, ".local", "share", "steward", "badger")
+	}
+
 	// Build config map
 	cfg := map[string]any{
 		"provider":      setup.Provider,
@@ -392,7 +401,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		},
 		"memory": map[string]any{
 			"backend":          "badger",
-			"data_dir":         "/var/lib/steward/badger",
+			"data_dir":         dataDir,
 			"short_term_limit": 10,
 		},
 		"shell": map[string]any{
@@ -401,7 +410,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 			"max_output_bytes": 65536,
 			"blocked_commands": []string{"rm -rf /", "rm -rf /*", "mkfs", "dd", "shutdown", "reboot"},
 		},
-		"integrations_dir": "/etc/steward/integrations",
+		"integrations_dir": integrationsDir,
 	}
 
 	yamlData, err := yaml.Marshal(cfg)
