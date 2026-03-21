@@ -57,6 +57,8 @@ archives:
       - LICENSE
       - config/core.yml.example
       - config/integrations/*.yml.example
+      - bridge/whatsapp/index.js
+      - bridge/whatsapp/package.json
 
 checksum:
   name_template: 'checksums.txt'
@@ -106,6 +108,8 @@ brews:
     homepage: https://github.com/brooqs/steward
     description: "AI Personal Assistant — single binary, multi-provider, voice-enabled"
     license: MIT
+    dependencies:
+      - name: node
     install: |
       bin.install "steward"
       bin.install "steward-satellite"
@@ -117,6 +121,13 @@ brews:
 
       # Create data directory
       (var/"lib/steward").mkpath
+
+      # Install WhatsApp bridge
+      (libexec/"bridge/whatsapp").install "bridge/whatsapp/index.js"
+      (libexec/"bridge/whatsapp").install "bridge/whatsapp/package.json"
+      cd libexec/"bridge/whatsapp" do
+        system "npm", "install", "--production"
+      end
     service: |
       run [opt_bin/"steward", "-config", etc/"steward/core.yml"]
       keep_alive true
@@ -128,3 +139,6 @@ brews:
         2. Edit #{etc}/steward/core.yml with your provider and API key
         3. brew services start steward
         4. Open http://localhost:8080 for the admin panel
+
+      WhatsApp bridge installed at: #{libexec}/bridge/whatsapp
+        Start: node #{libexec}/bridge/whatsapp/index.js

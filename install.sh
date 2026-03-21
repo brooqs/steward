@@ -90,6 +90,20 @@ fi
 mkdir -p "$DATA_DIR"
 echo "  ✅ Data directory created at $DATA_DIR"
 
+# Install WhatsApp bridge (if Node.js available)
+BRIDGE_DIR="$DATA_DIR/whatsapp-bridge"
+if [ -f "$TMP/bridge/whatsapp/index.js" ]; then
+  mkdir -p "$BRIDGE_DIR"
+  cp "$TMP/bridge/whatsapp/index.js" "$BRIDGE_DIR/"
+  cp "$TMP/bridge/whatsapp/package.json" "$BRIDGE_DIR/"
+  if command -v node &>/dev/null && command -v npm &>/dev/null; then
+    (cd "$BRIDGE_DIR" && npm install --production --silent 2>/dev/null)
+    echo "  ✅ WhatsApp bridge installed at $BRIDGE_DIR"
+  else
+    echo "  ℹ️  WhatsApp bridge files copied — install Node.js and run: cd $BRIDGE_DIR && npm install"
+  fi
+fi
+
 # OS-specific service setup
 if [ "$OS" = "darwin" ]; then
   # macOS: create launchd plist (user-space, no root)
