@@ -45,7 +45,8 @@ tar xzf "$TMP/steward.tar.gz" -C "$TMP"
 
 # Install binaries
 if [ "$OS" = "darwin" ]; then
-  # macOS: /usr/local/bin may need sudo, use cp instead of install
+  # macOS: /usr/local/bin may not exist on fresh installs
+  sudo mkdir -p "$INSTALL_DIR"
   sudo cp -f "$TMP/steward" "$INSTALL_DIR/steward"
   sudo chmod 755 "$INSTALL_DIR/steward"
   if [ -f "$TMP/steward-satellite" ]; then
