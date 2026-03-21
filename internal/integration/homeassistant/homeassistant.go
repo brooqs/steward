@@ -70,14 +70,14 @@ func (h *HAIntegration) GetTools() []tools.ToolSpec {
 		},
 		{
 			Name:        "ha_call_service",
-			Description: "Call a Home Assistant service to control devices — turn on/off lights, change color (RGB/HS), set brightness, adjust temperature, toggle switches, run scripts, control WLED",
+			Description: "Call a Home Assistant service to control devices — turn on/off lights, change color, set brightness, toggle switches. IMPORTANT: if you don't know the entity_id, call ha_list_entities first.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"domain":    map[string]any{"type": "string", "description": "Service domain: light, switch, climate, script, media_player"},
-					"service":   map[string]any{"type": "string", "description": "Service name: turn_on, turn_off, toggle"},
-					"entity_id": map[string]any{"type": "string", "description": "Target entity ID, e.g. light.wled"},
-					"extra":     map[string]any{"type": "object", "description": "Additional service data: rgb_color, hs_color, brightness, color_temp, temperature"},
+					"domain":       map[string]any{"type": "string", "description": "Service domain: light, switch, climate, script, media_player"},
+					"service":      map[string]any{"type": "string", "description": "Service name: turn_on, turn_off, toggle"},
+					"entity_id":    map[string]any{"type": "string", "description": "Target entity ID, e.g. light.wled. Must be exact — use ha_list_entities to find."},
+					"service_data": map[string]any{"type": "string", "description": `Optional JSON string for extra service parameters. Examples: {"rgb_color":[255,0,0]} or {"brightness":200} or {"color_temp":300}`},
 				},
 				"required": []string{"domain", "service"},
 			},
@@ -165,6 +165,15 @@ func (h *HAIntegration) callService(params map[string]any) (any, error) {
 	if extra, ok := params["extra"].(map[string]any); ok {
 		for k, v := range extra {
 			body[k] = v
+		}
+	}
+	// Handle service_data as JSON string (preferred for Groq/Llama compatibility)
+	if sd, ok := params["service_data"].(string); ok && sd != "" {
+		var sdMap map[string]any
+		if json.Unmarshal([]byte(sd), &sdMap) == nil {
+			for k, v := range sdMap {
+				body[k] = v
+			}
 		}
 	}
 	data, _ := json.Marshal(body)
