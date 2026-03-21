@@ -141,6 +141,25 @@ func (h *HAIntegration) callService(params map[string]any) (any, error) {
 		if !strings.Contains(eid, ".") && domain != "" {
 			eid = domain + "." + eid
 		}
+		// Validate entity exists before calling service
+		stateData, err := h.apiGet(fmt.Sprintf("/api/states/%s", eid))
+		if err != nil || len(stateData) == 0 {
+			return map[string]any{
+				"error": fmt.Sprintf("entity '%s' not found. Use ha_list_entities to find the correct entity_id", eid),
+			}, nil
+		}
+		// Check if HA returned a valid state (not 404)
+		var stateResp map[string]any
+		if json.Unmarshal(stateData, &stateResp) != nil {
+			return map[string]any{
+				"error": fmt.Sprintf("entity '%s' not found. Use ha_list_entities to find the correct entity_id", eid),
+			}, nil
+		}
+		if _, hasState := stateResp["state"]; !hasState {
+			return map[string]any{
+				"error": fmt.Sprintf("entity '%s' not found. Use ha_list_entities to find the correct entity_id", eid),
+			}, nil
+		}
 		body["entity_id"] = eid
 	}
 	if extra, ok := params["extra"].(map[string]any); ok {
