@@ -83,6 +83,12 @@ func main() {
 		}
 	}
 
+	// Config channel takes precedence over CLI flag
+	if cfg.Channel != "" {
+		*channel = cfg.Channel
+		slog.Info("channel from config", "channel", *channel)
+	}
+
 	// Setup mode: if no API key, run only the admin panel with onboarding wizard
 	// (llamacpp provider doesn't need an API key — it runs locally)
 	if cfg.APIKey == "" && cfg.Provider != "llamacpp" {

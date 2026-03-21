@@ -44,6 +44,7 @@ type Config struct {
 	Admin AdminConfig `yaml:"admin"`
 
 	// Channel settings
+	Channel  string         `yaml:"channel"` // telegram | whatsapp
 	Telegram TelegramConfig `yaml:"telegram"`
 	WhatsApp WhatsAppConfig `yaml:"whatsapp"`
 
