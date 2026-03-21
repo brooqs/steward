@@ -291,6 +291,7 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 				toolResults = append(toolResults, provider.ContentBlock{
 					Type:         "tool_result",
 					ToolResultID: tc.ToolUseID,
+					ToolName:     tc.ToolName,
 					Content:      result,
 				})
 			}

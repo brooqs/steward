@@ -66,6 +66,7 @@ type oaiRequest struct {
 type oaiMessage struct {
 	Role       string         `json:"role"`
 	Content    any            `json:"content"`           // string or null
+	Name       string         `json:"name,omitempty"`
 	ToolCalls  []oaiToolCall  `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 }
@@ -125,6 +126,7 @@ func (o *OpenAI) ChatCompletion(ctx context.Context, req *Request) (*Response, e
 		if len(m.Content) > 0 && m.Content[0].Type == "tool_result" {
 			om.Role = "tool"
 			om.ToolCallID = m.Content[0].ToolResultID
+			om.Name = m.Content[0].ToolName
 			om.Content = m.Content[0].Content
 			msgs = append(msgs, om)
 			continue
