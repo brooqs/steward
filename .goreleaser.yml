@@ -102,6 +102,7 @@ brews:
   - repository:
       owner: brooqs
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/brooqs/steward
     description: "AI Personal Assistant — single binary, multi-provider, voice-enabled"
     license: MIT
