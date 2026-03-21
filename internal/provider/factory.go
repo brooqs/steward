@@ -26,7 +26,16 @@ func New(providerName, apiKey, model, baseURL string) (Provider, error) {
 		}
 		return NewGemini(apiKey), nil
 
+	case "llamacpp":
+		// For llamacpp, baseURL = models directory, model = GGUF filename
+		modelsDir := baseURL
+		if modelsDir == "" {
+			modelsDir = "/var/lib/steward/models"
+		}
+		return NewLlamaCpp(modelsDir, model)
+
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", providerName)
 	}
 }
+

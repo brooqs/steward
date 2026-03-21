@@ -84,7 +84,8 @@ func main() {
 	}
 
 	// Setup mode: if no API key, run only the admin panel with onboarding wizard
-	if cfg.APIKey == "" {
+	// (llamacpp provider doesn't need an API key — it runs locally)
+	if cfg.APIKey == "" && cfg.Provider != "llamacpp" {
 		slog.Info("no API key configured — entering setup mode", "config", *configPath)
 
 		setupCtx, setupCancel := context.WithCancel(context.Background())

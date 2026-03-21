@@ -227,13 +227,14 @@ func (c *Config) validate() error {
 	validProviders := map[string]bool{
 		"claude": true, "openai": true, "groq": true,
 		"gemini": true, "ollama": true, "openrouter": true,
+		"llamacpp": true,
 	}
 	if !validProviders[strings.ToLower(c.Provider)] {
-		return fmt.Errorf("unknown provider %q, must be one of: claude, openai, groq, gemini, ollama, openrouter", c.Provider)
+		return fmt.Errorf("unknown provider %q, must be one of: claude, openai, groq, gemini, ollama, openrouter, llamacpp", c.Provider)
 	}
 
-	// ollama doesn't require api_key
-	if c.APIKey == "" && c.Provider != "ollama" {
+	// ollama and llamacpp don't require api_key
+	if c.APIKey == "" && c.Provider != "ollama" && c.Provider != "llamacpp" {
 		return fmt.Errorf("api_key is required for provider %q (set in config or STEWARD_API_KEY env)", c.Provider)
 	}
 
