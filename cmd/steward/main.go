@@ -307,56 +307,63 @@ func main() {
 		slog.Info("admin panel enabled", "addr", cfg.Admin.ListenAddr)
 	}
 
-	// Run the selected channel
+	// Run the selected channel (non-fatal — runs admin-only if channel unavailable)
+	channelRunning := false
+
 	switch *channel {
 	case "telegram":
 		ch, err := telegram.New(steward, cfg.Telegram)
 		if err != nil {
-			slog.Error("failed to create telegram channel", "error", err)
-			os.Exit(1)
-		}
-		if err := ch.Run(ctx); err != nil {
-			slog.Error("telegram channel error", "error", err)
-			os.Exit(1)
+			slog.Warn("telegram channel not available — running admin-only", "error", err)
+		} else {
+			channelRunning = true
+			if err := ch.Run(ctx); err != nil {
+				slog.Error("telegram channel error", "error", err)
+				os.Exit(1)
+			}
 		}
 
 	case "whatsapp":
 		ch, err := whatsapp.New(steward, cfg.WhatsApp, voiceEngine)
 		if err != nil {
-			slog.Error("failed to create whatsapp channel", "error", err)
-			os.Exit(1)
-		}
+			slog.Warn("whatsapp channel not available — running admin-only", "error", err)
+		} else {
+			channelRunning = true
+			// Start scheduler with WhatsApp as notification channel
+			schedSavePath := filepath.Join(filepath.Dir(cfg.IntegrationsDir), "scheduler.json")
+			sched := scheduler.New(scheduler.Config{
+				SavePath: schedSavePath,
+				ChatFn:   steward.Chat,
+				NotifyFn: func(channel, message string) error {
+					parts := strings.SplitN(channel, ":", 2)
+					if len(parts) != 2 || parts[0] != "whatsapp" {
+						return fmt.Errorf("unsupported channel: %s", channel)
+					}
+					ch.SendReply(parts[1], message)
+					return nil
+				},
+			})
+			registry.RegisterAll(sched.GetTools())
+			if err := sched.Start(); err != nil {
+				slog.Warn("scheduler start error", "error", err)
+			}
+			defer sched.Stop()
+			slog.Info("scheduler enabled", "save_path", schedSavePath)
 
-		// Start scheduler with WhatsApp as notification channel
-		schedSavePath := filepath.Join(filepath.Dir(cfg.IntegrationsDir), "scheduler.json")
-		sched := scheduler.New(scheduler.Config{
-			SavePath: schedSavePath,
-			ChatFn:   steward.Chat,
-			NotifyFn: func(channel, message string) error {
-				// Parse channel format: "whatsapp:905xxxxxxxxxx"
-				parts := strings.SplitN(channel, ":", 2)
-				if len(parts) != 2 || parts[0] != "whatsapp" {
-					return fmt.Errorf("unsupported channel: %s", channel)
-				}
-				ch.SendReply(parts[1], message)
-				return nil
-			},
-		})
-		registry.RegisterAll(sched.GetTools())
-		if err := sched.Start(); err != nil {
-			slog.Warn("scheduler start error", "error", err)
-		}
-		defer sched.Stop()
-		slog.Info("scheduler enabled", "save_path", schedSavePath)
-
-		if err := ch.Run(ctx); err != nil {
-			slog.Error("whatsapp channel error", "error", err)
-			os.Exit(1)
+			if err := ch.Run(ctx); err != nil {
+				slog.Error("whatsapp channel error", "error", err)
+				os.Exit(1)
+			}
 		}
 
 	default:
-		slog.Error("unknown channel", "channel", *channel)
-		os.Exit(1)
+		slog.Warn("no channel configured — running admin-only", "channel", *channel)
+	}
+
+	// If no channel is running, block on signal to keep admin panel alive
+	if !channelRunning {
+		slog.Info("running in admin-only mode — waiting for signal")
+		<-ctx.Done()
 	}
 }
 
