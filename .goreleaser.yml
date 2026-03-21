@@ -97,3 +97,34 @@ nfpms:
       - src: config/core.yml.example
         dst: /etc/steward/core.yml.example
         type: config
+
+brews:
+  - repository:
+      owner: brooqs
+      name: homebrew-tap
+    homepage: https://github.com/brooqs/steward
+    description: "AI Personal Assistant — single binary, multi-provider, voice-enabled"
+    license: MIT
+    install: |
+      bin.install "steward"
+      bin.install "steward-satellite"
+
+      # Create config directory
+      (etc/"steward").mkpath
+      (etc/"steward/integrations").mkpath
+      etc.install "config/core.yml.example" => "steward/core.yml.example"
+
+      # Create data directory
+      (var/"lib/steward").mkpath
+    service do
+      run [opt_bin/"steward", "-config", etc/"steward/core.yml"]
+      keep_alive true
+      log_path var/"log/steward.log"
+      error_log_path var/"log/steward.err"
+    end
+    caveats: |
+      To get started:
+        1. cp #{etc}/steward/core.yml.example #{etc}/steward/core.yml
+        2. Edit #{etc}/steward/core.yml with your provider and API key
+        3. brew services start steward
+        4. Open http://localhost:8080 for the admin panel
