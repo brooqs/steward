@@ -22,6 +22,7 @@ const maxToolIterations = 5
 // Steward is the central agent.
 type Steward struct {
 	provider     provider.Provider
+	toolRouter   provider.Provider // optional local sub-agent for tool calling (e.g. FunctionGemma)
 	registry     *tools.Registry
 	toolSelector *tools.ToolSelector
 	knowledge    *knowledge.Store
@@ -35,6 +36,7 @@ type Steward struct {
 // Config holds the parameters needed to create a Steward agent.
 type Config struct {
 	Provider     provider.Provider
+	ToolRouter   provider.Provider // optional — local model for tool calling
 	Registry     *tools.Registry
 	ToolSelector *tools.ToolSelector
 	Knowledge    *knowledge.Store
@@ -49,6 +51,7 @@ type Config struct {
 func New(cfg Config) *Steward {
 	return &Steward{
 		provider:     cfg.Provider,
+		toolRouter:   cfg.ToolRouter,
 		registry:     cfg.Registry,
 		toolSelector: cfg.ToolSelector,
 		knowledge:    cfg.Knowledge,
@@ -209,21 +212,100 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 	var usedTools []string
 	var toolSummary string // track tool calls for memory annotation
 
-	for i := 0; i < maxToolIterations; i++ {
-		// Send all tools — 49 tools is manageable for modern LLMs.
-		// Dynamic selection caused key tools to be filtered out.
-		toolSchemas := s.registry.GetSchemas()
+	// Build system prompt with knowledge context
+	sysPrompt := s.buildSystemPrompt()
+	if s.knowledge != nil {
+		results, err := s.knowledge.Query(ctx, userMessage, 3)
+		if err == nil && len(results) > 0 {
+			sysPrompt += knowledge.FormatContext(results)
+			slog.Info("knowledge context injected", "results", len(results))
+		}
+	}
 
-		// Query knowledge base for relevant context
-		sysPrompt := s.buildSystemPrompt()
-		if s.knowledge != nil && i == 0 {
-			results, err := s.knowledge.Query(ctx, userMessage, 3)
-			if err == nil && len(results) > 0 {
-				sysPrompt += knowledge.FormatContext(results)
-				slog.Info("knowledge context injected", "results", len(results))
-			}
+	toolSchemas := s.registry.GetSchemas()
+
+	// --- Two-model path: FunctionGemma (tool router) + Groq (main) ---
+	if s.toolRouter != nil {
+		// Step 1: Ask FunctionGemma which tool to call (if any)
+		routerReq := &provider.Request{
+			Model:        "", // use whatever model is loaded
+			SystemPrompt: "You are a tool-calling assistant. Analyze the user's request and call the appropriate function. If no function is needed, respond with a brief text answer.",
+			Messages:     currentMessages,
+			Tools:        toolSchemas,
+			MaxTokens:    512,
 		}
 
+		slog.Info("tool router request", "tools", len(routerReq.Tools), "messages", len(routerReq.Messages))
+		routerResp, err := s.toolRouter.ChatCompletion(ctx, routerReq)
+		if err != nil {
+			slog.Warn("tool router failed, falling back to main provider", "error", err)
+			// Fall through to main provider below
+		} else {
+			toolCalls := routerResp.ToolCalls()
+			slog.Info("tool router response", "provider", s.toolRouter.Name(), "stop_reason", routerResp.StopReason, "tool_calls", len(toolCalls))
+
+			if len(toolCalls) > 0 {
+				// Execute tools
+				var toolContext strings.Builder
+				toolContext.WriteString("[Tool actions performed:\n")
+
+				for _, tc := range toolCalls {
+					toolStart := time.Now()
+					slog.Info("tool call", "name", tc.ToolName, "input", tc.ToolInput)
+					usedTools = append(usedTools, tc.ToolName)
+					toolSummary += fmt.Sprintf("[Used tool: %s] ", tc.ToolName)
+
+					result, dispatchErr := s.registry.Dispatch(tc.ToolName, tc.ToolInput)
+					if dispatchErr != nil {
+						slog.Error("tool error", "name", tc.ToolName, "duration", time.Since(toolStart), "error", dispatchErr)
+						result = fmt.Sprintf(`{"error": "%s"}`, dispatchErr.Error())
+					} else {
+						slog.Info("tool result", "name", tc.ToolName, "duration", time.Since(toolStart), "result_len", len(result))
+
+						// Cache result in knowledge base
+						if s.knowledge != nil && s.knowledge.IsCacheable(tc.ToolName) {
+							inputKey := fmt.Sprintf("%v", tc.ToolInput)
+							go func(name, key, res string) {
+								if cacheErr := s.knowledge.StoreResult(context.Background(), name, key, res); cacheErr != nil {
+									slog.Warn("knowledge cache failed", "tool", name, "error", cacheErr)
+								}
+							}(tc.ToolName, inputKey, result)
+						}
+					}
+
+					toolContext.WriteString(fmt.Sprintf("- %s: %s\n", tc.ToolName, truncate(result, 500)))
+				}
+				toolContext.WriteString("]\n")
+
+				// Step 2: Send to main provider (Groq) with tool results as context
+				mainMessages := make([]provider.Message, len(currentMessages))
+				copy(mainMessages, currentMessages)
+				// Append tool context as a system-injected user note
+				mainMessages = append(mainMessages, provider.NewTextMessage("user",
+					toolContext.String()+"\nPlease respond to the user in a natural, friendly way based on the above tool results. Keep it concise."))
+
+				mainReq := &provider.Request{
+					Model:        s.model,
+					SystemPrompt: sysPrompt,
+					Messages:     mainMessages,
+					MaxTokens:    s.maxTokens,
+				}
+
+				slog.Info("main llm request", "messages", len(mainReq.Messages))
+				mainResp, mainErr := s.provider.ChatCompletion(ctx, mainReq)
+				if mainErr != nil {
+					return "", toolSummary, fmt.Errorf("main provider: %w", mainErr)
+				}
+
+				text := mainResp.ExtractText()
+				slog.Info("main llm response", "provider", s.provider.Name(), "len", len(text))
+				return text, toolSummary, nil
+			}
+		}
+	}
+
+	// --- Single-model path (fallback or no tool router) ---
+	for i := 0; i < maxToolIterations; i++ {
 		req := &provider.Request{
 			Model:        s.model,
 			SystemPrompt: sysPrompt,
@@ -244,22 +326,16 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 		slog.Info("llm response", "provider", s.provider.Name(), "stop_reason", resp.StopReason, "tool_calls", len(toolCalls))
 
 		// Tool use — dispatch tools and continue
-		// Check BOTH stop_reason AND actual presence of tool calls in content
 		if resp.StopReason == "tool_use" || len(toolCalls) > 0 {
-			// Add assistant response to messages
 			currentMessages = append(currentMessages, provider.Message{
 				Role:    "assistant",
 				Content: resp.Content,
 			})
 
-			// Dispatch each tool call
 			var toolResults []provider.ContentBlock
-
 			for _, tc := range toolCalls {
 				toolStart := time.Now()
 				slog.Info("tool call", "name", tc.ToolName, "input", tc.ToolInput)
-
-				// Track used tools for pinning in next iteration
 				usedTools = append(usedTools, tc.ToolName)
 				toolSummary += fmt.Sprintf("[Used tool: %s] ", tc.ToolName)
 
@@ -269,20 +345,11 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 					result = fmt.Sprintf(`{"error": "%s"}`, err.Error())
 				} else {
 					slog.Info("tool result", "name", tc.ToolName, "duration", time.Since(toolStart), "result_len", len(result))
-					preview := result
-					if len(preview) > 200 {
-						preview = preview[:200] + "..."
-					}
-					slog.Debug("tool result detail", "name", tc.ToolName, "result", preview)
-
-					// Cache result in knowledge base
 					if s.knowledge != nil && s.knowledge.IsCacheable(tc.ToolName) {
 						inputKey := fmt.Sprintf("%v", tc.ToolInput)
 						go func(name, key, res string) {
 							if err := s.knowledge.StoreResult(context.Background(), name, key, res); err != nil {
 								slog.Warn("knowledge cache failed", "tool", name, "error", err)
-							} else {
-								slog.Debug("knowledge cached", "tool", name)
 							}
 						}(tc.ToolName, inputKey, result)
 					}
@@ -296,7 +363,6 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 				})
 			}
 
-			// Add tool results as user message
 			currentMessages = append(currentMessages, provider.Message{
 				Role:    "user",
 				Content: toolResults,
@@ -306,7 +372,7 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 			continue
 		}
 
-		// Unexpected stop reason — return whatever text we have
+		// Final text response
 		text := resp.ExtractText()
 		if text == "" {
 			text = fmt.Sprintf("(unexpected stop reason: %s)", resp.StopReason)

@@ -185,9 +185,26 @@ func main() {
 		}
 	}
 
+	// Create tool router (local sub-agent for tool calling)
+	var toolRouter provider.Provider
+	if cfg.ToolRouter.Enabled {
+		modelsDir := cfg.ToolRouter.ModelsDir
+		if modelsDir == "" {
+			modelsDir = "/var/lib/steward/models"
+		}
+		tr, err := provider.NewLlamaCpp(modelsDir, cfg.ToolRouter.Model)
+		if err != nil {
+			slog.Warn("tool router disabled", "error", err)
+		} else {
+			toolRouter = tr
+			slog.Info("tool router ready", "model", cfg.ToolRouter.Model)
+		}
+	}
+
 	// Create the agent
 	steward := core.New(core.Config{
 		Provider:     llm,
+		ToolRouter:   toolRouter,
 		Registry:     registry,
 		ToolSelector: toolSelector,
 		Knowledge:    kb,

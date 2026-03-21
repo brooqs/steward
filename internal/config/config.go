@@ -22,6 +22,9 @@ type Config struct {
 	BaseURL  string `yaml:"base_url"` // custom endpoint for ollama/openrouter
 	MaxTokens int   `yaml:"max_tokens"`
 
+	// Tool Router (local sub-agent for tool calling)
+	ToolRouter ToolRouterConfig `yaml:"tool_router"`
+
 	// System prompt
 	SystemPrompt string `yaml:"system_prompt"`
 
@@ -49,6 +52,13 @@ type Config struct {
 
 	// Paths
 	IntegrationsDir string `yaml:"integrations_dir"`
+}
+
+// ToolRouterConfig configures the local FunctionGemma sub-agent for tool calling.
+type ToolRouterConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	Model     string `yaml:"model"`      // GGUF model filename
+	ModelsDir string `yaml:"models_dir"` // path to models directory
 }
 
 // MemoryConfig configures the memory subsystem.
