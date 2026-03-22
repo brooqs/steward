@@ -197,6 +197,10 @@ export function Setup() {
   const [pullStatus, setPullStatus] = useState('');
   const [selectedSoul, setSelectedSoul] = useState(null);
   const [customSoul, setCustomSoul] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   const [form, setForm] = useState({
     username: 'admin',
     password: '',
@@ -342,7 +346,7 @@ export function Setup() {
   };
 
   const canNext = () => {
-    if (step === 1) return form.username && form.password;
+    if (step === 1) return form.username && form.password && form.password === passwordConfirm;
     if (step === 2) return providerType !== null;
     if (step === 3) {
       if (providerType === 'local') return ollamaStatus?.running;
@@ -422,7 +426,6 @@ export function Setup() {
           </div>
         )}
 
-        {/* Step 1: Admin Credentials */}
         {step === 1 && (
           <div class="setup-content">
             <h2 style="margin: 0 0 4px;">🔐 Admin Credentials</h2>
@@ -435,7 +438,29 @@ export function Setup() {
             </div>
             <div class="form-group">
               <label>Password</label>
-              <input type="password" value={form.password} onInput={e => update('password', e.target.value)} placeholder="Choose a strong password" autoFocus />
+              <div class="input-toggle">
+                <input type={showPassword ? 'text' : 'password'} value={form.password}
+                  onInput={e => update('password', e.target.value)} placeholder="Choose a strong password" autoFocus />
+                <button type="button" class="toggle-btn" onClick={() => setShowPassword(v => !v)}>
+                  {showPassword ? '🙈' : '👁️'}
+                </button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Confirm Password</label>
+              <div class="input-toggle">
+                <input type={showConfirm ? 'text' : 'password'} value={passwordConfirm}
+                  onInput={e => setPasswordConfirm(e.target.value)} placeholder="Re-enter password" />
+                <button type="button" class="toggle-btn" onClick={() => setShowConfirm(v => !v)}>
+                  {showConfirm ? '🙈' : '👁️'}
+                </button>
+              </div>
+              {passwordConfirm && form.password !== passwordConfirm && (
+                <p style="color: var(--danger); font-size: 11px; margin: 4px 0 0;">⚠️ Passwords don't match</p>
+              )}
+              {passwordConfirm && form.password === passwordConfirm && (
+                <p style="color: var(--success); font-size: 11px; margin: 4px 0 0;">✅ Passwords match</p>
+              )}
             </div>
           </div>
         )}
@@ -553,8 +578,13 @@ export function Setup() {
                 </div>
                 <div class="form-group">
                   <label>API Key</label>
-                  <input type="password" value={form.api_key} onInput={e => update('api_key', e.target.value)}
-                    placeholder="Paste your API key" autoFocus />
+                  <div class="input-toggle">
+                    <input type={showApiKey ? 'text' : 'password'} value={form.api_key} onInput={e => update('api_key', e.target.value)}
+                      placeholder="Paste your API key" autoFocus />
+                    <button type="button" class="toggle-btn" onClick={() => setShowApiKey(v => !v)}>
+                      {showApiKey ? '🙈' : '👁️'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -951,6 +981,24 @@ export function Setup() {
           font-size: 14px;
         }
         .btn-secondary:hover { color: var(--text); }
+        .input-toggle {
+          position: relative;
+          display: flex;
+          align-items: center;
+        }
+        .input-toggle input { flex: 1; padding-right: 40px; }
+        .toggle-btn {
+          position: absolute;
+          right: 8px;
+          background: none;
+          border: none;
+          cursor: pointer;
+          font-size: 16px;
+          padding: 4px;
+          opacity: 0.6;
+          transition: opacity 0.2s;
+        }
+        .toggle-btn:hover { opacity: 1; }
       `}</style>
     </div>
   );
