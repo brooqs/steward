@@ -280,10 +280,9 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 				}
 				toolContext.WriteString("]\n")
 
-				// Step 2: Send to main provider (Groq) with tool results as context
+				// Step 2: Send to main provider with tool results as context
 				mainMessages := make([]provider.Message, len(currentMessages))
 				copy(mainMessages, currentMessages)
-				// Append tool context as a system-injected user note
 				mainMessages = append(mainMessages, provider.NewTextMessage("user",
 					toolContext.String()+"\nPlease respond to the user in a natural, friendly way based on the above tool results. Keep it concise."))
 
@@ -304,6 +303,23 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 				slog.Info("main llm response", "provider", s.provider.Name(), "len", len(text))
 				return text, toolSummary, nil
 			}
+
+			// No tool calls — send directly to main provider WITHOUT tools
+			slog.Info("no tool calls, forwarding to main provider without tools")
+			mainReq := &provider.Request{
+				Model:        s.model,
+				SystemPrompt: sysPrompt,
+				Messages:     currentMessages,
+				MaxTokens:    s.maxTokens,
+				// NOTE: no Tools field — main model may not support tools
+			}
+			mainResp, mainErr := s.provider.ChatCompletion(ctx, mainReq)
+			if mainErr != nil {
+				return "", "", fmt.Errorf("main provider: %w", mainErr)
+			}
+			text := mainResp.ExtractText()
+			slog.Info("main llm response", "provider", s.provider.Name(), "len", len(text))
+			return text, "", nil
 		}
 	}
 
