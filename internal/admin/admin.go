@@ -474,11 +474,8 @@ func (s *Server) handleBridgeProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if bridgeURL == "" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"error": "bridge_url not configured — set it in Channels page",
-		})
-		return
+		// Default to local bridge
+		bridgeURL = "http://127.0.0.1:3000"
 	}
 
 	// Strip /api/whatsapp/ prefix → forward to bridge
