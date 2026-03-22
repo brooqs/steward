@@ -35,6 +35,12 @@ let reconnectAttempt = 0;
 const lidToPhone = new Map();
 
 async function startConnection() {
+  // Close existing socket if any
+  if (sock) {
+    try { sock.end(); } catch {}
+    sock = null;
+  }
+
   const { state: authState, saveCreds } = await useMultiFileAuthState(DATA_DIR);
 
   // Fetch latest WhatsApp version to avoid 405 errors
@@ -114,10 +120,17 @@ async function startConnection() {
         // Logged out — clear session and restart for fresh QR
         state.connectedAt = null;
         console.log('🗑️  Clearing session for fresh QR...');
-        const fs = require('fs');
-        try { fs.rmSync(DATA_DIR, { recursive: true, force: true }); } catch {}
+        try {
+          const fs = require('fs');
+          fs.rmSync(DATA_DIR, { recursive: true, force: true });
+          console.log('✅ Session cleared');
+        } catch (e) {
+          console.log('⚠️  Session clear error:', e.message);
+        }
         reconnectAttempt = 0;
-        setTimeout(startConnection, 2000);
+        // Wait longer to avoid WhatsApp rate limiting
+        console.log('   Restarting in 5s...');
+        setTimeout(startConnection, 5000);
       }
     }
   });
