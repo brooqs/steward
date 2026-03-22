@@ -26,7 +26,10 @@ export function Setup() {
   const [providerType, setProviderType] = useState(null); // 'local' | 'cloud'
   const [ollamaStatus, setOllamaStatus] = useState(null);
   const [installing, setInstalling] = useState(false);
+  const [ollamaWaiting, setOllamaWaiting] = useState(false);
+  const [ollamaWaitStart, setOllamaWaitStart] = useState(null);
   const [pulling, setPulling] = useState(false);
+  const [pullProgress, setPullProgress] = useState(null);
   const [pullStatus, setPullStatus] = useState('');
   const [form, setForm] = useState({
     username: 'admin',
@@ -60,34 +63,88 @@ export function Setup() {
 
   const handleInstallOllama = async () => {
     setInstalling(true);
+    setError('');
     try {
       const res = await fetch('/api/ollama/install', { method: 'POST' });
       const data = await res.json();
-      if (data.error) setError(data.error);
-      else await checkOllama();
-    } catch { setError('Install failed'); }
-    setInstalling(false);
+      if (data.error) {
+        setError(data.error);
+        setInstalling(false);
+      } else {
+        // Switch to waiting mode — poll until Ollama is running
+        setInstalling(false);
+        setOllamaWaiting(true);
+        setOllamaWaitStart(Date.now());
+      }
+    } catch {
+      setError('Install failed');
+      setInstalling(false);
+    }
   };
+
+  // Poll while waiting for Ollama to start
+  useEffect(() => {
+    if (!ollamaWaiting) return;
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch('/api/ollama/status');
+        const data = await res.json();
+        setOllamaStatus(data);
+        if (data.running) {
+          setOllamaWaiting(false);
+          clearInterval(poll);
+        }
+      } catch {}
+    }, 3000);
+    return () => clearInterval(poll);
+  }, [ollamaWaiting]);
 
   const handlePullModel = async (model) => {
     setPulling(true);
-    setPullStatus(`Downloading ${model}... This may take a few minutes.`);
+    setPullStatus(`Downloading ${model}...`);
+    setPullProgress({ status: 'starting', percent: 0 });
     try {
       const res = await fetch('/api/ollama/pull', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model }),
       });
-      const data = await res.json();
-      if (data.error) {
-        setPullStatus('❌ ' + data.error);
-      } else {
-        setPullStatus('✅ ' + data.message);
-        update('model', model);
-        await checkOllama();
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.status === 'success') {
+              setPullStatus('✅ ' + model + ' downloaded!');
+              setPullProgress(null);
+              update('model', model);
+              await checkOllama();
+            } else if (data.total > 0) {
+              const pct = Math.round((data.completed / data.total) * 100);
+              setPullProgress({ status: data.status, percent: pct });
+              setPullStatus(`${data.status} — ${pct}%`);
+            } else {
+              setPullProgress({ status: data.status, percent: 0 });
+              setPullStatus(data.status);
+            }
+          } catch {}
+        }
       }
     } catch {
       setPullStatus('❌ Download failed');
+      setPullProgress(null);
     }
     setPulling(false);
   };
@@ -257,15 +314,23 @@ export function Setup() {
                       </p>
                     </div>
                   </div>
-                ) : ollamaStatus.installed ? (
-                  <div class="status-card status-warn">
-                    <span style="font-size: 24px;">⚠️</span>
-                    <div>
-                      <strong>Ollama installed but not running</strong>
-                      <p style="margin: 2px 0 0; font-size: 12px; color: var(--text-muted);">
-                        Start it with: <code>brew services start ollama</code>
-                      </p>
+                ) : ollamaStatus.installed || ollamaWaiting ? (
+                  <div>
+                    <div class="status-card status-warn">
+                      <span style="font-size: 24px;">⏳</span>
+                      <div>
+                        <strong>Please wait, Ollama is getting ready...</strong>
+                        <p style="margin: 2px 0 0; font-size: 12px; color: var(--text-muted);">
+                          Ollama is installed and starting up. This usually takes a few seconds.
+                        </p>
+                      </div>
                     </div>
+                    {ollamaWaitStart && (Date.now() - ollamaWaitStart) > 60000 && (
+                      <div style="margin-top: 12px; padding: 10px 14px; background: var(--surface-hover); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-muted);">
+                        💡 It's been over a minute. You can try starting it manually:
+                        <code style="display: block; margin-top: 6px; padding: 6px 10px; background: var(--bg); border-radius: 4px;">brew services start ollama</code>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div>
@@ -366,6 +431,11 @@ export function Setup() {
             {pullStatus && (
               <div style="margin-top: 12px; padding: 10px 14px; background: var(--surface-hover); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-muted);">
                 {pullStatus}
+                {pullProgress && pullProgress.percent > 0 && (
+                  <div class="progress-bar">
+                    <div class="progress-fill" style={`width: ${pullProgress.percent}%`}></div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -552,6 +622,19 @@ export function Setup() {
         .model-card.selected {
           border-color: var(--accent);
           background: rgba(99,102,241,0.08);
+        }
+        .progress-bar {
+          height: 6px;
+          background: var(--border);
+          border-radius: 3px;
+          margin-top: 8px;
+          overflow: hidden;
+        }
+        .progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, var(--accent), #818cf8);
+          border-radius: 3px;
+          transition: width 0.3s ease;
         }
         .btn-small {
           background: var(--accent);

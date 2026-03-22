@@ -753,7 +753,6 @@ func (s *Server) handleOllamaInstall(w http.ResponseWriter, r *http.Request) {
 
 // handleOllamaPull downloads/pulls a model.
 func (s *Server) handleOllamaPull(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
 	if r.Method != "POST" {
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)
 		return
@@ -763,35 +762,63 @@ func (s *Server) handleOllamaPull(w http.ResponseWriter, r *http.Request) {
 		Model string `json:"model"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Model == "" {
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"error": "model is required"})
 		return
 	}
 
-	// Pull model via Ollama API
+	// Pull model via Ollama API with streaming
 	client := &http.Client{Timeout: 30 * time.Minute}
 	pullBody, _ := json.Marshal(map[string]any{
 		"name":   req.Model,
-		"stream": false,
+		"stream": true,
 	})
 	resp, err := client.Post("http://localhost:11434/api/pull", "application/json",
 		strings.NewReader(string(pullBody)))
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"error": "Ollama not reachable: " + err.Error()})
 		return
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 200 {
-		json.NewEncoder(w).Encode(map[string]any{
-			"message": req.Model + " downloaded successfully!",
-			"status":  "ok",
-		})
-	} else {
-		body, _ := io.ReadAll(resp.Body)
-		json.NewEncoder(w).Encode(map[string]any{
-			"error": "Pull failed: " + string(body),
-		})
+	// Stream progress via SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
 	}
+
+	decoder := json.NewDecoder(resp.Body)
+	for decoder.More() {
+		var progress struct {
+			Status    string `json:"status"`
+			Total     int64  `json:"total"`
+			Completed int64  `json:"completed"`
+		}
+		if err := decoder.Decode(&progress); err != nil {
+			break
+		}
+		data, _ := json.Marshal(map[string]any{
+			"status":    progress.Status,
+			"total":     progress.Total,
+			"completed": progress.Completed,
+		})
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	// Send done event
+	done, _ := json.Marshal(map[string]any{
+		"status": "success",
+		"model":  req.Model,
+	})
+	fmt.Fprintf(w, "data: %s\n\n", done)
+	flusher.Flush()
 }
 
 func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
