@@ -52,7 +52,7 @@ var (
 func main() {
 	// CLI flags
 	configPath := flag.String("config", "config/core.yml", "path to configuration file")
-	channel := flag.String("channel", "telegram", "channel to use: telegram | whatsapp")
+	channel := flag.String("channel", "auto", "channel to use: auto | telegram | whatsapp")
 	logLevel := flag.String("log-level", "info", "log level: debug | info | warn | error")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
@@ -80,6 +80,20 @@ func main() {
 		} else {
 			slog.Error("failed to load config", "error", err)
 			os.Exit(1)
+		}
+	}
+
+	// Auto-detect channel from config if not explicitly set
+	if *channel == "auto" {
+		if cfg.WhatsApp.BridgeURL != "" {
+			*channel = "whatsapp"
+		} else if cfg.Telegram.Token != "" {
+			*channel = "telegram"
+		} else {
+			*channel = ""
+		}
+		if *channel != "" {
+			slog.Info("auto-detected channel", "channel", *channel)
 		}
 	}
 
