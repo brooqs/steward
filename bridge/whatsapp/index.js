@@ -111,7 +111,13 @@ async function startConnection() {
         console.log('   Retry in ' + (delay / 1000) + 's (attempt ' + reconnectAttempt + ')');
         setTimeout(startConnection, delay);
       } else {
+        // Logged out — clear session and restart for fresh QR
         state.connectedAt = null;
+        console.log('🗑️  Clearing session for fresh QR...');
+        const fs = require('fs');
+        try { fs.rmSync(DATA_DIR, { recursive: true, force: true }); } catch {}
+        reconnectAttempt = 0;
+        setTimeout(startConnection, 2000);
       }
     }
   });
@@ -225,13 +231,22 @@ app.post('/send', async (req, res) => {
 // Logout (disconnect WhatsApp session)
 app.post('/logout', async (req, res) => {
   try {
-    await sock.logout();
+    if (sock) await sock.logout();
     state.status = 'disconnected';
     state.qrData = null;
     state.connectedAt = null;
-    res.json({ status: 'logged out' });
+    res.json({ status: 'logged out — generating new QR...' });
+    // Connection close handler will clear session and restart
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // Force restart even if logout fails
+    state.status = 'disconnected';
+    state.qrData = null;
+    state.connectedAt = null;
+    const fs = require('fs');
+    try { fs.rmSync(DATA_DIR, { recursive: true, force: true }); } catch {}
+    reconnectAttempt = 0;
+    setTimeout(startConnection, 2000);
+    res.json({ status: 'session cleared — generating new QR...' });
   }
 });
 

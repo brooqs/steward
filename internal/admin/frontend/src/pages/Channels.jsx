@@ -6,7 +6,7 @@ const STATUS_LABELS = {
   qr: { text: 'Waiting for QR scan', badge: 'badge-warning', icon: '📱' },
   authenticated: { text: 'Authenticated', badge: 'badge-success', icon: '🔐' },
   ready: { text: 'Connected', badge: 'badge-success', icon: '✅' },
-  disconnected: { text: 'Disconnected', badge: 'badge-error', icon: '❌' },
+  disconnected: { text: 'Reconnecting...', badge: 'badge-warning', icon: '🔄' },
 };
 
 function WhatsAppBridge({ toast }) {
