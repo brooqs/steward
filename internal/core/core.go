@@ -21,38 +21,41 @@ const maxToolIterations = 5
 
 // Steward is the central agent.
 type Steward struct {
-	provider     provider.Provider
-	toolRouter   provider.Provider // optional local sub-agent for tool calling (e.g. FunctionGemma)
-	registry     *tools.Registry
-	toolSelector *tools.ToolSelector
-	knowledge    *knowledge.Store
-	memory       memory.Store
-	model        string
-	maxTokens    int
-	sysPrompt    string
-	policies     []string
+	provider        provider.Provider
+	toolRouter      provider.Provider // optional local sub-agent for tool calling (e.g. FunctionGemma)
+	toolRouterModel string            // model name for tool router
+	registry        *tools.Registry
+	toolSelector    *tools.ToolSelector
+	knowledge       *knowledge.Store
+	memory          memory.Store
+	model           string
+	maxTokens       int
+	sysPrompt       string
+	policies        []string
 }
 
 // Config holds the parameters needed to create a Steward agent.
 type Config struct {
-	Provider     provider.Provider
-	ToolRouter   provider.Provider // optional — local model for tool calling
-	Registry     *tools.Registry
-	ToolSelector *tools.ToolSelector
-	Knowledge    *knowledge.Store
-	Memory       memory.Store
-	Model        string
-	MaxTokens    int
-	SystemPrompt string
-	Policies     []string
+	Provider        provider.Provider
+	ToolRouter      provider.Provider // optional — local model for tool calling
+	ToolRouterModel string            // model name for tool router
+	Registry        *tools.Registry
+	ToolSelector    *tools.ToolSelector
+	Knowledge       *knowledge.Store
+	Memory          memory.Store
+	Model           string
+	MaxTokens       int
+	SystemPrompt    string
+	Policies        []string
 }
 
 // New creates a new Steward agent.
 func New(cfg Config) *Steward {
 	return &Steward{
-		provider:     cfg.Provider,
-		toolRouter:   cfg.ToolRouter,
-		registry:     cfg.Registry,
+		provider:        cfg.Provider,
+		toolRouter:      cfg.ToolRouter,
+		toolRouterModel: cfg.ToolRouterModel,
+		registry:        cfg.Registry,
 		toolSelector: cfg.ToolSelector,
 		knowledge:    cfg.Knowledge,
 		memory:       cfg.Memory,
@@ -228,7 +231,7 @@ func (s *Steward) runTurn(ctx context.Context, userMessage string, messages []pr
 	if s.toolRouter != nil {
 		// Step 1: Ask FunctionGemma which tool to call (if any)
 		routerReq := &provider.Request{
-			Model:        "", // use whatever model is loaded
+			Model:        s.toolRouterModel, // use tool router's model
 			SystemPrompt: "You are a tool-calling assistant. Analyze the user's request and call the appropriate function. If no function is needed, respond with a brief text answer.",
 			Messages:     currentMessages,
 			Tools:        toolSchemas,

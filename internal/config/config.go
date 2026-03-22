@@ -55,11 +55,13 @@ type Config struct {
 	IntegrationsDir string `yaml:"integrations_dir"`
 }
 
-// ToolRouterConfig configures the local FunctionGemma sub-agent for tool calling.
+// ToolRouterConfig configures the local sub-agent for tool calling.
+// Supports Ollama models (e.g. functiongemma) or local GGUF models via llama.cpp.
 type ToolRouterConfig struct {
 	Enabled   bool   `yaml:"enabled"`
-	Model     string `yaml:"model"`      // GGUF model filename
-	ModelsDir string `yaml:"models_dir"` // path to models directory
+	Provider  string `yaml:"provider"`   // "ollama" or "llamacpp" (default: auto-detect)
+	Model     string `yaml:"model"`      // Ollama model name or GGUF filename
+	ModelsDir string `yaml:"models_dir"` // path to models directory (llamacpp only)
 }
 
 // MemoryConfig configures the memory subsystem.

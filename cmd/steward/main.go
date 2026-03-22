@@ -208,23 +208,41 @@ func main() {
 	// Create tool router (local sub-agent for tool calling)
 	var toolRouter provider.Provider
 	if cfg.ToolRouter.Enabled {
-		modelsDir := cfg.ToolRouter.ModelsDir
-		if modelsDir == "" {
-			modelsDir = "/var/lib/steward/models"
+		routerProvider := cfg.ToolRouter.Provider
+		// Auto-detect provider: if no provider set and model doesn't end in .gguf, assume ollama
+		if routerProvider == "" {
+			if strings.HasSuffix(cfg.ToolRouter.Model, ".gguf") {
+				routerProvider = "llamacpp"
+			} else {
+				routerProvider = "ollama"
+			}
 		}
-		tr, err := provider.NewLlamaCpp(modelsDir, cfg.ToolRouter.Model)
-		if err != nil {
-			slog.Warn("tool router disabled", "error", err)
-		} else {
+
+		switch routerProvider {
+		case "ollama":
+			tr := provider.NewOpenAI("ollama-router", "ollama", "http://localhost:11434/v1")
 			toolRouter = tr
-			slog.Info("tool router ready", "model", cfg.ToolRouter.Model)
+			slog.Info("tool router ready", "provider", "ollama", "model", cfg.ToolRouter.Model)
+		default: // llamacpp
+			modelsDir := cfg.ToolRouter.ModelsDir
+			if modelsDir == "" {
+				modelsDir = "/var/lib/steward/models"
+			}
+			tr, err := provider.NewLlamaCpp(modelsDir, cfg.ToolRouter.Model)
+			if err != nil {
+				slog.Warn("tool router disabled", "error", err)
+			} else {
+				toolRouter = tr
+				slog.Info("tool router ready", "provider", "llamacpp", "model", cfg.ToolRouter.Model)
+			}
 		}
 	}
 
 	// Create the agent
 	steward := core.New(core.Config{
 		Provider:     llm,
-		ToolRouter:   toolRouter,
+		ToolRouter:      toolRouter,
+		ToolRouterModel: cfg.ToolRouter.Model,
 		Registry:     registry,
 		ToolSelector: toolSelector,
 		Knowledge:    kb,
