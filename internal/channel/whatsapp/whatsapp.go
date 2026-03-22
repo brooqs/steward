@@ -40,6 +40,9 @@ func New(steward *core.Steward, cfg config.WhatsAppConfig, ve *voice.Engine) (*C
 	if addr == "" {
 		addr = "0.0.0.0:8765"
 	}
+	// Strip accidental http:// prefix — listen_addr is host:port only
+	addr = strings.TrimPrefix(addr, "http://")
+	addr = strings.TrimPrefix(addr, "https://")
 	allowed := make(map[string]bool, len(cfg.AllowedIDs))
 	for _, id := range cfg.AllowedIDs {
 		allowed[strings.TrimSpace(id)] = true
