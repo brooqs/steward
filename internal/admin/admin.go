@@ -124,6 +124,13 @@ func (s *Server) Run(ctx context.Context) error {
 	// Setup endpoint (no auth in setup mode)
 	if s.cfg.SetupMode {
 		mux.HandleFunc("/api/setup", s.handleSetup)
+		mux.HandleFunc("/api/ollama/status", s.handleOllamaStatus)
+		mux.HandleFunc("/api/ollama/install", s.handleOllamaInstall)
+		mux.HandleFunc("/api/ollama/pull", s.handleOllamaPull)
+	} else {
+		mux.HandleFunc("/api/ollama/status", s.requireAuth(s.handleOllamaStatus))
+		mux.HandleFunc("/api/ollama/install", s.requireAuth(s.handleOllamaInstall))
+		mux.HandleFunc("/api/ollama/pull", s.requireAuth(s.handleOllamaPull))
 	}
 
 	// Serve Preact SPA (embedded)
@@ -351,7 +358,9 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if setup.Username == "" || setup.Password == "" || setup.Provider == "" || setup.APIKey == "" {
+	// Ollama and llamacpp don't need API keys
+	needsAPIKey := setup.Provider != "ollama" && setup.Provider != "llamacpp"
+	if setup.Username == "" || setup.Password == "" || setup.Provider == "" || (needsAPIKey && setup.APIKey == "") {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "username, password, provider and api_key are required"})
@@ -644,6 +653,146 @@ func findBridgePath() string {
 	return ""
 }
 
+// ── Ollama Management ──────────────────────────────────────
+
+// handleOllamaStatus checks if Ollama is installed, running, and lists available models.
+func (s *Server) handleOllamaStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	result := map[string]any{
+		"installed": false,
+		"running":   false,
+		"models":    []string{},
+	}
+
+	// Check if ollama binary exists
+	ollamaPath := findBinary("ollama", []string{"/opt/homebrew/bin/ollama", "/usr/local/bin/ollama"})
+	if ollamaPath == "" {
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+	result["installed"] = true
+
+	// Check if Ollama API is responding
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://localhost:11434/api/tags")
+	if err != nil {
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 200 {
+		result["running"] = true
+		var tagsResp struct {
+			Models []struct {
+				Name string `json:"name"`
+				Size int64  `json:"size"`
+			} `json:"models"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&tagsResp); err == nil {
+			models := []map[string]any{}
+			for _, m := range tagsResp.Models {
+				models = append(models, map[string]any{
+					"name": m.Name,
+					"size": m.Size,
+				})
+			}
+			result["models"] = models
+		}
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+// handleOllamaInstall installs Ollama via brew (macOS) or guides user (Linux).
+func (s *Server) handleOllamaInstall(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != "POST" {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if runtime.GOOS == "darwin" {
+		// Install via brew
+		cmd := exec.Command("/opt/homebrew/bin/brew", "install", "ollama")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]any{
+				"error":  "Installation failed: " + err.Error(),
+				"output": string(out),
+			})
+			return
+		}
+		// Start ollama service
+		exec.Command("/opt/homebrew/bin/brew", "services", "start", "ollama").Run()
+		// Wait a moment for it to start
+		time.Sleep(2 * time.Second)
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"message": "Ollama installed and started!",
+			"status":  "ok",
+		})
+	} else {
+		// Linux: use the official install script
+		cmd := exec.Command("sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]any{
+				"error":  "Installation failed: " + err.Error(),
+				"output": string(out),
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"message": "Ollama installed!",
+			"status":  "ok",
+		})
+	}
+}
+
+// handleOllamaPull downloads/pulls a model.
+func (s *Server) handleOllamaPull(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != "POST" {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Model string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Model == "" {
+		json.NewEncoder(w).Encode(map[string]any{"error": "model is required"})
+		return
+	}
+
+	// Pull model via Ollama API
+	client := &http.Client{Timeout: 30 * time.Minute}
+	pullBody, _ := json.Marshal(map[string]any{
+		"name":   req.Model,
+		"stream": false,
+	})
+	resp, err := client.Post("http://localhost:11434/api/pull", "application/json",
+		strings.NewReader(string(pullBody)))
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{"error": "Ollama not reachable: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 200 {
+		json.NewEncoder(w).Encode(map[string]any{
+			"message": req.Model + " downloaded successfully!",
+			"status":  "ok",
+		})
+	} else {
+		body, _ := io.ReadAll(resp.Body)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": "Pull failed: " + string(body),
+		})
+	}
+}
 
 func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 	// GET ?name=xxx → return specific integration config
