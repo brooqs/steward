@@ -61,6 +61,7 @@ type oaiRequest struct {
 	MaxTokens   int           `json:"max_tokens,omitempty"`
 	Tools       []oaiTool     `json:"tools,omitempty"`
 	Temperature float64       `json:"temperature,omitempty"`
+	KeepAlive   *int          `json:"keep_alive,omitempty"` // Ollama-specific: -1 = keep model in memory forever
 }
 
 type oaiMessage struct {
@@ -211,6 +212,12 @@ func (o *OpenAI) ChatCompletion(ctx context.Context, req *Request) (*Response, e
 		MaxTokens: req.MaxTokens,
 		Messages:  msgs,
 		Tools:     tools,
+	}
+
+	// Ollama: keep model in memory permanently to avoid cold start delays
+	if o.name == "ollama" {
+		keepAlive := -1
+		body.KeepAlive = &keepAlive
 	}
 
 	data, err := json.Marshal(body)
