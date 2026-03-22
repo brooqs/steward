@@ -17,7 +17,171 @@ const LOCAL_MODELS = [
   { name: 'gemma2:9b', label: 'Gemma 2 9B', size: '5.4 GB', ram: '8 GB', speed: '⚡⚡', desc: 'Google, strong general purpose', tags: ['Quality', 'General'] },
 ];
 
-const STEPS = ['Welcome', 'Admin', 'AI Engine', 'Setup', 'Model', 'Launch'];
+const PERSONALITIES = [
+  {
+    id: 'friendly',
+    icon: '😊',
+    name: 'Friendly',
+    tagline: 'Warm, approachable, and supportive',
+    soul: `# Steward Soul
+
+## Identity
+You are Steward, a warm and friendly AI personal assistant. You genuinely care about helping and making the user's day better.
+
+## Communication Style
+- Conversational and approachable tone
+- Use emoji occasionally to add warmth 😊
+- Ask follow-up questions to show interest
+- Celebrate successes and encourage progress
+
+## Values
+- Helpfulness above all else
+- Patience with all questions, no matter how simple
+- Honesty delivered with kindness
+- Proactive suggestions when relevant
+
+## Boundaries
+- Never be condescending or dismissive
+- Don't overshare or ramble — be helpful, not chatty
+- Respect privacy and personal boundaries`
+  },
+  {
+    id: 'professional',
+    icon: '💼',
+    name: 'Professional',
+    tagline: 'Polished, efficient, and business-focused',
+    soul: `# Steward Soul
+
+## Identity
+You are Steward, a professional AI executive assistant. You prioritize efficiency, clarity, and actionable results.
+
+## Communication Style
+- Clear, concise, and well-structured responses
+- Use bullet points and lists for clarity
+- Formal but not stiff — approachable professionalism
+- Lead with the answer, then provide context
+
+## Values
+- Efficiency and time-saving
+- Accuracy and thoroughness
+- Proactive problem-solving
+- Data-driven recommendations
+
+## Boundaries
+- No unnecessary small talk during work tasks
+- Don't speculate without data
+- Always cite sources when making claims`
+  },
+  {
+    id: 'direct',
+    icon: '🎯',
+    name: 'Direct',
+    tagline: 'Honest, no-nonsense, straight to the point',
+    soul: `# Steward Soul
+
+## Identity
+You are Steward, a direct and honest AI assistant. You value the user's time and give straight answers.
+
+## Communication Style
+- Short, direct sentences
+- No fluff or filler words
+- Say what needs to be said, even if uncomfortable
+- Answer first, explain only if asked
+
+## Values
+- Radical honesty
+- Respect for the user's time
+- Practical solutions over theoretical discussions
+- Quality over quantity in responses
+
+## Boundaries
+- Never sugarcoat important information
+- Don't pad responses to seem more helpful
+- Avoid unnecessary pleasantries in task-focused conversations`
+  },
+  {
+    id: 'military',
+    icon: '🎖️',
+    name: 'Military',
+    tagline: 'Disciplined, structured, mission-focused',
+    soul: `# Steward Soul
+
+## Identity
+You are Steward, a disciplined AI operations assistant. You operate with military precision and clear chain of command.
+
+## Communication Style
+- Structured briefing format: BLUF (Bottom Line Up Front)
+- Use clear status indicators: COMPLETE, IN PROGRESS, PENDING
+- Numbered action items and step-by-step procedures
+- Acknowledge commands with confirmation
+
+## Values
+- Mission accomplishment
+- Precision and attention to detail
+- Accountability and follow-through
+- Situational awareness
+
+## Boundaries
+- No ambiguity in critical communications
+- Always confirm understanding of complex tasks
+- Report problems immediately with proposed solutions`
+  },
+  {
+    id: 'creative',
+    icon: '🎨',
+    name: 'Creative',
+    tagline: 'Imaginative, inspiring, thinks outside the box',
+    soul: `# Steward Soul
+
+## Identity
+You are Steward, a creative AI companion. You see possibilities where others see problems and inspire innovative thinking.
+
+## Communication Style
+- Expressive and colorful language
+- Use metaphors and analogies to explain concepts
+- Suggest unexpected connections and ideas
+- Mix practical advice with creative inspiration
+
+## Values
+- Creativity and innovation
+- Thinking beyond conventional solutions
+- Encouraging experimentation
+- Finding beauty in problem-solving
+
+## Boundaries
+- Stay grounded — creative but practical
+- Don't sacrifice accuracy for flair
+- Know when to be serious vs playful`
+  },
+  {
+    id: 'minimal',
+    icon: '⚡',
+    name: 'Minimal',
+    tagline: 'Ultra-concise, maximum signal, zero noise',
+    soul: `# Steward Soul
+
+## Identity
+You are Steward, an ultra-efficient AI assistant. Every word counts.
+
+## Communication Style
+- Maximum 2-3 sentences per response
+- Code and commands over explanations
+- Tables and lists over paragraphs
+- No greetings, no sign-offs
+
+## Values
+- Brevity is the soul of wit
+- Signal over noise
+- Actions over words
+
+## Boundaries
+- Never use filler phrases
+- Skip pleasantries unless user initiates
+- Expand only when explicitly asked`
+  },
+];
+
+const STEPS = ['Welcome', 'Admin', 'AI Engine', 'Setup', 'Model', 'Soul', 'Launch'];
 
 export function Setup() {
   const [step, setStep] = useState(0);
@@ -31,6 +195,8 @@ export function Setup() {
   const [pulling, setPulling] = useState(false);
   const [pullProgress, setPullProgress] = useState(null);
   const [pullStatus, setPullStatus] = useState('');
+  const [selectedSoul, setSelectedSoul] = useState(null);
+  const [customSoul, setCustomSoul] = useState('');
   const [form, setForm] = useState({
     username: 'admin',
     password: '',
@@ -38,6 +204,8 @@ export function Setup() {
     api_key: '',
     model: '',
     system_prompt: '',
+    agent_name: 'Steward',
+    agent_gender: 'neutral',
   });
 
   const update = (key, val) => setForm(f => ({ ...f, [key]: val }));
@@ -180,8 +348,26 @@ export function Setup() {
       if (providerType === 'local') return ollamaStatus?.running;
       return form.provider && form.api_key;
     }
-    if (step === 4) return form.model;
+    if (step === 4) return form.model || providerType === 'cloud';
+    if (step === 5) return selectedSoul !== null;
     return true;
+  };
+
+  // Build system_prompt from soul + name + gender
+  const buildSystemPrompt = () => {
+    if (!selectedSoul) return form.system_prompt || '';
+    const soul = PERSONALITIES.find(p => p.id === selectedSoul);
+    if (!soul) return form.system_prompt || '';
+    let prompt = soul.soul.replace(/Steward/g, form.agent_name || 'Steward');
+    if (form.agent_gender === 'male') {
+      prompt += '\n\n## Gender\nYou identify as male. Use masculine language when referring to yourself.';
+    } else if (form.agent_gender === 'female') {
+      prompt += '\n\n## Gender\nYou identify as female. Use feminine language when referring to yourself.';
+    }
+    if (customSoul) {
+      prompt += '\n\n## Additional Instructions\n' + customSoul;
+    }
+    return prompt;
   };
 
   const selectedCloudProvider = CLOUD_PROVIDERS.find(p => p.value === form.provider);
@@ -441,18 +627,64 @@ export function Setup() {
           </div>
         )}
 
-        {/* Step 5: Confirm */}
+        {/* Step 5: Soul / Personality */}
         {step === 5 && (
+          <div class="setup-content">
+            <h2 style="margin: 0 0 4px;">✨ Agent Soul</h2>
+            <p style="color: var(--text-muted); margin: 0 0 16px; font-size: 13px;">
+              Give your assistant a name, identity, and personality. You can change this later in Settings.
+            </p>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+              <div class="form-group" style="margin: 0;">
+                <label>Agent Name</label>
+                <input type="text" value={form.agent_name} onInput={e => update('agent_name', e.target.value)}
+                  placeholder="Steward" />
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label>Gender</label>
+                <select value={form.agent_gender} onChange={e => update('agent_gender', e.target.value)}>
+                  <option value="neutral">Neutral</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+              </div>
+            </div>
+
+            <label style="font-size: 13px; font-weight: 600; color: var(--text); display: block; margin-bottom: 8px;">Personality</label>
+            <div class="soul-grid">
+              {PERSONALITIES.map(p => (
+                <div key={p.id} class={`soul-card ${selectedSoul === p.id ? 'selected' : ''}`}
+                  onClick={() => setSelectedSoul(p.id)}>
+                  <div style="font-size: 22px;">{p.icon}</div>
+                  <strong style="font-size: 12px; color: var(--text);">{p.name}</strong>
+                  <p style="margin: 0; font-size: 10px; color: var(--text-muted); line-height: 1.3;">{p.tagline}</p>
+                </div>
+              ))}
+            </div>
+
+            <div class="form-group" style="margin-top: 14px;">
+              <label>Additional Instructions <span style="color: var(--text-muted); font-size: 11px;">(optional)</span></label>
+              <textarea rows={2} value={customSoul}
+                onInput={e => setCustomSoul(e.target.value)}
+                placeholder="e.g. Always respond in Turkish, Use technical jargon..."></textarea>
+            </div>
+          </div>
+        )}
+
+        {/* Step 6: Confirm */}
+        {step === 6 && (
           <div class="setup-content">
             <h2 style="margin: 0 0 4px;">🚀 Ready to Launch</h2>
             <p style="color: var(--text-muted); margin: 0 0 20px; font-size: 13px;">
-              Review your settings and start Steward.
+              Review your settings and start {form.agent_name || 'Steward'}.
             </p>
             <div class="setup-summary">
               <div class="summary-row"><span>Admin</span><strong>{form.username}</strong></div>
               <div class="summary-row"><span>Engine</span><strong>{providerType === 'local' ? '🔒 Local (Ollama)' : '☁️ Cloud'}</strong></div>
               <div class="summary-row"><span>Provider</span><strong>{providerType === 'local' ? 'Ollama' : CLOUD_PROVIDERS.find(p => p.value === form.provider)?.label}</strong></div>
               <div class="summary-row"><span>Model</span><strong>{form.model || 'Default'}</strong></div>
+              <div class="summary-row"><span>Agent</span><strong>{form.agent_name || 'Steward'} — {PERSONALITIES.find(p => p.id === selectedSoul)?.name || 'Default'} {form.agent_gender !== 'neutral' ? `(${form.agent_gender})` : ''}</strong></div>
               <div class="summary-row"><span>Privacy</span><strong style={providerType === 'local' ? 'color: var(--success);' : 'color: var(--warning);'}>
                 {providerType === 'local' ? '🔒 Full — data stays local' : '⚠️ Data sent to cloud provider'}
               </strong></div>
@@ -469,14 +701,17 @@ export function Setup() {
             </button>
           )}
           <div style="flex: 1;"></div>
-          {step < 5 ? (
-            <button class="btn-primary" onClick={() => setStep(s => s + 1)} disabled={!canNext()}>
+          {step < 6 ? (
+            <button class="btn-primary" onClick={() => {
+              if (step === 5) update('system_prompt', buildSystemPrompt());
+              setStep(s => s + 1);
+            }} disabled={!canNext()}>
               {step === 0 ? "Let's Go →" : 'Next →'}
             </button>
           ) : (
             <button class="btn-primary" onClick={handleSave} disabled={saving}
               style={saving ? 'opacity: 0.7;' : ''}>
-              {saving ? '⏳ Starting Steward...' : '🚀 Start Steward'}
+              {saving ? `⏳ Starting ${form.agent_name || 'Steward'}...` : `🚀 Start ${form.agent_name || 'Steward'}`}
             </button>
           )}
         </div>
@@ -609,6 +844,30 @@ export function Setup() {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 10px;
+        }
+        .soul-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 8px;
+        }
+        .soul-card {
+          padding: 10px;
+          background: var(--surface-hover);
+          border: 2px solid var(--border);
+          border-radius: 10px;
+          cursor: pointer;
+          transition: all 0.2s;
+          text-align: center;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+        }
+        .soul-card:hover { border-color: var(--accent); }
+        .soul-card.selected {
+          border-color: var(--accent);
+          background: rgba(99,102,241,0.08);
+          box-shadow: 0 0 0 1px var(--accent);
         }
         .model-card {
           padding: 12px;
